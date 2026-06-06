@@ -34,7 +34,8 @@ class Cell:
 
         # Territory and morphology properties
         self.target_area = target_area  # Desired area from biological parameters
-        print(f"🐛 CELL_INIT: Cell {cell_id} target_area = {self.target_area}")
+        # Per-cell debug print disabled (kept only warnings / end-of-step summaries).
+        # print(f"🐛 CELL_INIT: Cell {cell_id} target_area = {self.target_area}")
         self.actual_area = 0.0  # Actual area assigned in the mosaic
         self.territory_pixels = []  # List of (x, y) pixel coordinates owned by this cell
         self.boundary_points = []  # Boundary of the cell territory
