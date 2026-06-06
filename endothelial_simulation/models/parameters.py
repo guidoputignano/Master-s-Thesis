@@ -22,6 +22,21 @@ class ModelParameters:
         self.high_shear_threshold = 4.0  # Above this is considered high shear
 
         # ------------------------------
+        # Paper (Table 1, main.tex) ground-truth parameters
+        # ------------------------------
+        self.tau_act = 0.5            # Source: Table 1, main.tex — tau_act = 0.5 Pa
+        self.rho_star = 2.3           # Source: Table 1, main.tex — rho* = 2.3 (-)
+        self.theta_star = 20.0        # Source: Table 1, main.tex — theta* = 20 degrees
+        self.tau_adapt_hours = 9.0    # Source: Table 1, main.tex — tau_adapt = 6-12 h (nominal)
+        # eq:gamma_quad parameters
+        self.gamma_min = 0.00278      # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
+        self.alpha_gamma = 0.00497    # Source: Table 1, main.tex — alpha_gamma = 0.00497 Pa^-2 h^-1
+        self.tau_opt = 1.4            # Source: Table 1, main.tex — tau_opt = 1.4 Pa
+        self.xi = 0.05                # Source: Table 1, main.tex — xi = 0.05 per stage
+        # baseline (static, no-flow) aspect ratio for the gated interpolation
+        self.aspect_ratio_static = 1.0
+
+        # ------------------------------
         # Temporal dynamics parameters
         # ------------------------------
         # Base time constant (in minutes)
@@ -45,11 +60,10 @@ class ModelParameters:
         # ------------------------------
         # Spatial parameters
         # ------------------------------
-        # Base aspect ratio for cells
-        self.optimal_aspect_ratio_base = 2.0
-
-        # How much aspect ratio changes per unit of shear stress
-        self.aspect_ratio_sensitivity = 0.2
+        # NOTE: the adapted aspect ratio is the gated plateau rho* (see
+        # calculate_optimal_aspect_ratio); the previous linear law
+        # (optimal_aspect_ratio_base + aspect_ratio_sensitivity*tau) did not match
+        # the paper and has been removed.
 
         # Cell size parameters (in pixels)
         self.cell_size_min = 20
@@ -60,17 +74,16 @@ class ModelParameters:
         # Population dynamics parameters
         # ------------------------------
         # Maximum number of divisions a cell can undergo
-        self.max_divisions = 15
+        self.max_divisions = 15  # Source: Table 1, main.tex — N (Hayflick limit) = 15-18 PD
 
-        # Base cell division rate (per minute)
-        # 0.0006 would be about once per 28 hours on average
-        self.division_rate = 0 #0.0006
+        # Base cell division rate (per hour)
+        self.division_rate = 0.025  # Source: Table 1, main.tex — r = 0.02-0.03 h^-1 (nominal)
 
-        # Base cell death rate (per minute)
-        self.death_rate = 0 #0.0001
+        # Base cell death rate (per hour) — inactive over the 6 h horizon (Table 1)
+        self.death_rate = 0.0  # Source: Table 1, main.tex — d_E inactive (6 h timescale)
 
-        # Carrying capacity (maximum sustainable cell count)
-        self.carrying_capacity = 200
+        # Carrying capacity / density midpoint (cells/cm^2)
+        self.carrying_capacity = 5.5e4  # Source: Table 1, main.tex — K = 5-6e4 cells/cm^2 (nominal)
 
         # ------------------------------
         # Senescence parameters
@@ -128,27 +141,31 @@ class ModelParameters:
         Returns:
             Optimal aspect ratio for the given shear stress
         """
-        return self.optimal_aspect_ratio_base + self.aspect_ratio_sensitivity * tau
+        # eq:target, main.tex — gated interpolation toward the adapted plateau rho*.
+        # Below tau_act the morphology stays isotropic (static baseline).
+        # Source: Table 1, main.tex — rho* = 2.3, tau_act = 0.5 Pa
+        if tau <= self.tau_act:
+            s = 0.0
+        else:
+            s = 1.0 - np.exp(-(tau - self.tau_act) / self.tau_act)
+        return self.aspect_ratio_static + (self.rho_star - self.aspect_ratio_static) * s
 
     def calculate_shear_stress_effect(self, tau):
         """
-        Model how shear stress affects senescence rate.
-
-        Implements a piecewise function with different sensitivity in different
-        shear stress regimes.
+        Model how shear stress affects the stress-induced senescence rate.
 
         Args:
             tau: Shear stress in Pa
 
         Returns:
-            Rate of stress-induced senescence
+            Rate of stress-induced senescence gamma_tau (h^-1)
         """
-        if tau <= 10:  # Low shear stress
-            return 0.002 + tau * 0.0005
-        elif tau <= 20:  # Moderate shear stress
-            return 0.007 + (tau - 10) * 0.001
-        else:  # High shear stress
-            return 0.017 + (tau - 20) * 0.005
+        # eq:gamma_quad, main.tex — U-shaped quadratic induction rate
+        #   gamma_tau(tau) = gamma_min + alpha_gamma * (tau - tau_opt)^2
+        # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
+        # Source: Table 1, main.tex — alpha_gamma = 0.00497 Pa^-2 h^-1
+        # Source: Table 1, main.tex — tau_opt = 1.4 Pa
+        return self.gamma_min + self.alpha_gamma * (tau - self.tau_opt) ** 2
 
     def calculate_max_response(self, tau):
         """

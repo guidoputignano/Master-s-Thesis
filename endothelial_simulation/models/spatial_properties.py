@@ -40,7 +40,7 @@ class SpatialPropertiesModel:
             },
             'orientation_mean': {
                 0.0: 45.0,     # Random orientation (degrees)
-                1.4: 22.0,     # Partial alignment with flow 
+                1.4: 20.0,     # Source: Table 1, main.tex — theta* = 20 degrees (flow-adapted)
                 3.0: 0.0       # NEW: Perfect flow alignment at higher pressure
             }
         }
