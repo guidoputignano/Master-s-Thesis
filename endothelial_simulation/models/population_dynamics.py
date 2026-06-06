@@ -31,6 +31,12 @@ class PopulationDynamicsModel:
         self.d_S_stress = config.death_rate_senescent_stress
         self.gamma_S = config.senescence_induction_factor
 
+        # Paper (Table 1, main.tex) senescence-induction parameters (eq:gamma_quad)
+        self.gamma_min = getattr(config, 'gamma_min', 0.00278)    # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
+        self.alpha_gamma = getattr(config, 'alpha_gamma', 0.00497)  # Source: Table 1, main.tex — alpha_gamma = 0.00497 Pa^-2 h^-1
+        self.tau_opt = getattr(config, 'tau_opt', 1.4)            # Source: Table 1, main.tex — tau_opt = 1.4 Pa
+        self.xi = getattr(config, 'xi', 0.05)                     # Source: Table 1, main.tex — xi = 0.05 per stage
+
         # Senolytic parameters
         self.senolytic_conc = config.senolytic_concentration
         self.sen_efficacy_tel = config.senolytic_efficacy_tel
@@ -144,15 +150,14 @@ class PopulationDynamicsModel:
             tau: Shear stress value (Pa)
 
         Returns:
-            Senescence induction rate
+            Senescence induction rate gamma_tau (h^-1)
         """
-        # Implementation from thesis model
-        if tau <= 1:  # Low shear stress
-            return 0.002 + tau * 0.05  # Very minor effect - changed to try
-        elif tau <= 2:  # Moderate shear stress
-            return 0.007 + (tau - 1) * 0.1  # Slight increase
-        else:  # High shear stress
-            return 0.017 + (tau - 2) * 0.5  # More rapid increase
+        # eq:gamma_quad, main.tex — U-shaped quadratic induction rate
+        #   gamma_tau(tau) = gamma_min + alpha_gamma * (tau - tau_opt)^2
+        # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
+        # Source: Table 1, main.tex — alpha_gamma = 0.00497 Pa^-2 h^-1
+        # Source: Table 1, main.tex — tau_opt = 1.4 Pa
+        return self.gamma_min + self.alpha_gamma * (tau - self.tau_opt) ** 2
 
     def calculate_senolytic_effect(self, concentration, efficacy_factor=1.0):
         """
@@ -224,18 +229,68 @@ class PopulationDynamicsModel:
 
         return distribution
 
-    def calculate_density_factor(self, total_cells):
+    def calculate_density_factor(self, N_E):
         """
-        Calculate density-dependent inhibition factor for cell division.
+        Calculate density-dependent (contact-inhibition) factor for cell division.
 
         Parameters:
-            total_cells: Total number of cells
+            N_E: Healthy cell count/density (sum of E_i), per eq:density
 
         Returns:
-            Density factor (0-1)
+            Density factor g(N_E) in (0, 1]
         """
-        # Sigmoid function allowing growth until approaching capacity
-        return 1 / (1 + np.exp(10 * (total_cells / self.K - 0.7)))
+        # eq:density, main.tex — contact inhibition through the density factor
+        #   g(N_E) = 1 / (1 + N_E / K)
+        # Source: Table 1, main.tex — K = 5-6e4 cells/cm^2
+        return 1.0 / (1.0 + N_E / self.K)
+
+    def reduced_rhs(self, state, tau):
+        """
+        Right-hand side of the reduced population ODE (eq:reduced, main.tex),
+        valid in the parallel-plate, six-hour, treatment-free regime where
+        d_E = d_S = gamma_S = alpha = 0:
+
+            dE_i/dt   = 2 r g(N_E) E_{i-1} - r g(N_E) E_i - gamma_tau(tau)(1+xi i) E_i
+            dS_tel/dt = r g(N_E) E_N
+            dS_str/dt = sum_i gamma_tau(tau)(1+xi i) E_i
+
+        Units are the paper's: rates in h^-1, tau in Pa.
+
+        Parameters:
+            state: array-like [E_0, ..., E_N, S_tel, S_str] (length N+3)
+            tau:   wall shear stress (Pa)
+
+        Returns:
+            numpy array of time derivatives, same layout as `state`.
+        """
+        state = np.asarray(state, dtype=float)
+        N = self.max_divisions
+        E = state[:N + 1]
+        S_tel = state[N + 1]
+        S_str = state[N + 2]
+
+        N_E = float(np.sum(E))
+        g = self.calculate_density_factor(N_E)          # eq:density
+        gamma_tau = self.calculate_shear_stress_effect(tau)  # eq:gamma_quad
+
+        dE = np.zeros(N + 1)
+        dS_str = 0.0
+        for i in range(N + 1):
+            division_in = 2.0 * self.r * g * E[i - 1] if i > 0 else 0.0
+            division_out = self.r * g * E[i]
+            sen_rate = gamma_tau * (1.0 + self.xi * i)   # Source: Table 1 — xi = 0.05
+            dE[i] = division_in - division_out - sen_rate * E[i]
+            dS_str += sen_rate * E[i]
+
+        # Division at the terminal stage feeds replicative senescence (eq:Stel)
+        dS_tel = self.r * g * E[N]
+        # The terminal division_out above already removed E_N; route it to S_tel.
+
+        dstate = np.empty_like(state)
+        dstate[:N + 1] = dE
+        dstate[N + 1] = dS_tel
+        dstate[N + 2] = dS_str
+        return dstate
 
     def calculate_division_capacity(self, division_stage):
         """
@@ -278,10 +333,12 @@ class PopulationDynamicsModel:
         # Calculate total cells for density factor
         totals = self.calculate_total_cells()
         total_cells = totals['total']
+        E_total = totals['E_total']  # N_E (healthy count) used by eq:density
         S_total = totals['S_total']
 
         # Calculate regulatory factors
-        density_factor = self.calculate_density_factor(total_cells)
+        # eq:density, main.tex — density factor is a function of the healthy count N_E
+        density_factor = self.calculate_density_factor(E_total)
         gamma_tau = self.calculate_shear_stress_effect(tau)
         senolytic_effect_tel = self.calculate_senolytic_effect(self.senolytic_conc, self.sen_efficacy_tel)
         senolytic_effect_stress = self.calculate_senolytic_effect(self.senolytic_conc, self.sen_efficacy_stress)
@@ -299,30 +356,26 @@ class PopulationDynamicsModel:
             age_sensitivity_factor = 1.0 + 0.08 * i
             death_rate = self.d_E * (1 + 0.03 * i) + senolytic_toxicity * age_sensitivity_factor
 
-            # Stress-induced senescence rate
-            stress_senescence_rate = gamma_tau * (1 + 0.05 * i)
+            # Stress-induced senescence rate, eq:Ei/eq:reduced — gamma_tau(tau)*(1 + xi*i)
+            # Source: Table 1, main.tex — xi = 0.05 per stage
+            stress_senescence_rate = gamma_tau * (1 + self.xi * i)
 
             # Senescence induction by SASP
             sasp_senescence_rate = self.gamma_S * S_total
 
-            # Division capacity
-            division_capacity = self.calculate_division_capacity(i)
-
-            # Calculate terms for this division stage
+            # Calculate division terms for this stage (eq:Ei, main.tex):
+            #   division in  = 2 * r * g(N_E) * E_{i-1}
+            #   division out =     r * g(N_E) * E_i
+            # The previous implementation multiplied these by a division_capacity(i)
+            # ramp that does not appear in eq:Ei; it has been removed.
             if i == 0:
                 # First group (E_0) - undivided cells
-                division_out = self.r * E[i] * density_factor * division_capacity
+                division_out = self.r * E[i] * density_factor
                 division_in = 0
-            elif i < self.max_divisions:
-                # Middle groups
-                division_capacity_prev = self.calculate_division_capacity(i - 1)
-                division_in = 2 * self.r * E[i - 1] * density_factor * division_capacity_prev
-                division_out = self.r * E[i] * density_factor * division_capacity
             else:
-                # Last group - at maximum division count
-                division_capacity_prev = self.calculate_division_capacity(i - 1)
-                division_in = 2 * self.r * E[i - 1] * density_factor * division_capacity_prev
-                division_out = self.r * E[i] * density_factor * division_capacity
+                # Middle and terminal groups
+                division_in = 2 * self.r * E[i - 1] * density_factor
+                division_out = self.r * E[i] * density_factor
 
             # Cell loss terms
             death_term = death_rate * E[i]

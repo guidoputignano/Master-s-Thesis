@@ -36,6 +36,10 @@ class TemporalDynamicsModel:
         self.tau_base = config.tau_base
         self.lambda_scale = config.lambda_scale
 
+        # Paper (Table 1, main.tex) temporal-dynamics parameters
+        self.tau_act = getattr(config, 'tau_act', 0.5)              # Source: Table 1, main.tex — tau_act = 0.5 Pa
+        self.tau_adapt_hours = getattr(config, 'tau_adapt_hours', 9.0)  # Source: Table 1, main.tex — tau_adapt = 6-12 h
+
         # Calculate linear model parameters for A_max
         P_known = np.array(list(self.A_max_map.keys()))
         A_max_known = np.array(list(self.A_max_map.values()))
@@ -50,6 +54,86 @@ class TemporalDynamicsModel:
             'orientation': 0.1,      # Cell orientation/alignment (reduced for faster adaptation)
             'aspect_ratio': 1.0,     # Cell elongation/shape
         }
+
+    def s_activation(self, tau, tau_act=None):
+        """
+        Monotone activation gate s(tau) of eq:target (main.tex):
+
+            s(tau) = 0                              for tau <= tau_act
+            s(tau) = 1 - exp(-(tau - tau_act)/tau_act)  for tau >  tau_act   -> 1 as tau >> tau_act
+
+        Cells reorganize only above the activation shear stress tau_act; below it
+        the morphology remains isotropic.
+
+        Parameters:
+            tau: wall shear stress (Pa)
+            tau_act: activation threshold (Pa); defaults to Table-1 value (0.5 Pa)
+
+        Returns:
+            Activation in [0, 1).
+        """
+        if tau_act is None:
+            tau_act = self.tau_act  # Source: Table 1, main.tex — tau_act = 0.5 Pa
+        if tau <= tau_act:
+            return 0.0
+        return 1.0 - np.exp(-(tau - tau_act) / tau_act)
+
+    def gated_target(self, y_stat, y_flow, tau, tau_act=None):
+        """
+        Gated interpolation target y*(tau) of eq:target (main.tex):
+
+            y*(tau) = y_stat + (y_flow - y_stat) * s(tau)
+
+        Parameters:
+            y_stat: static (no-flow) baseline value
+            y_flow: flow-adapted plateau value
+            tau:    wall shear stress (Pa)
+            tau_act: activation threshold (Pa)
+
+        Returns:
+            Stimulus-dependent target value.
+        """
+        return y_stat + (y_flow - y_stat) * self.s_activation(tau, tau_act)
+
+    def relax_step(self, y, y_target, dt, tau_adapt=None):
+        """
+        Closed-form first-order relaxation step (eq:relaxation / eq:stepsolution):
+
+            y(t+dt) = y_target - (y_target - y) * exp(-dt / tau_adapt)
+
+        Parameters:
+            y:         current value
+            y_target:  stimulus-dependent target y*(tau)
+            dt:        time step (hours, paper units)
+            tau_adapt: adaptation time constant (hours); defaults to Table-1 nominal
+
+        Returns:
+            Updated value after dt.
+        """
+        if tau_adapt is None:
+            tau_adapt = self.tau_adapt_hours  # Source: Table 1, main.tex — tau_adapt = 6-12 h
+        return y_target - (y_target - y) * np.exp(-dt / tau_adapt)
+
+    def orientation_step(self, theta, theta_target, dt, tau_adapt=None):
+        """
+        Angular first-order relaxation on the circle (eq:orientation, main.tex)
+        using the shortest-arc wrapping operator
+            <psi> = ((psi + pi) mod 2*pi) - pi.
+
+        Parameters:
+            theta:        current orientation (radians)
+            theta_target: target orientation theta*(tau) (radians)
+            dt:           time step (hours)
+            tau_adapt:    adaptation time constant (hours)
+
+        Returns:
+            Updated orientation (radians).
+        """
+        if tau_adapt is None:
+            tau_adapt = self.tau_adapt_hours
+        # shortest-arc difference
+        diff = ((theta_target - theta) + np.pi) % (2 * np.pi) - np.pi
+        return theta + diff * (1.0 - np.exp(-dt / tau_adapt))
 
     def calculate_A_max(self, P):
         """

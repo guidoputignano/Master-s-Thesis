@@ -77,8 +77,22 @@ class SimulationConfig:
         self.tau_orientation_minutes = 1.0
         self.tau_aspect_ratio_minutes = 50.0
 
+        # === PAPER (Table 1, main.tex) GROUND-TRUTH PARAMETERS ===
+        # Spatial / temporal morphological targets
+        self.tau_act = 0.5            # Source: Table 1, main.tex — tau_act = 0.5 Pa
+        self.rho_star = 2.3           # Source: Table 1, main.tex — rho* = 2.3 (-)
+        self.theta_star = 20.0        # Source: Table 1, main.tex — theta* = 20 degrees
+        self.tau_adapt_hours = 9.0    # Source: Table 1, main.tex — tau_adapt = 6-12 h (nominal midpoint)
+        self.target_area_healthy_um2 = 2354.0   # Source: Table 1, main.tex — A_E* = 2354 um^2
+        # Population / senescence kinetics (eq:gamma_quad, eq:density)
+        self.gamma_min = 0.00278      # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
+        self.alpha_gamma = 0.00497    # Source: Table 1, main.tex — alpha_gamma = 0.00497 Pa^-2 h^-1
+        self.tau_opt = 1.4            # Source: Table 1, main.tex — tau_opt = 1.4 Pa
+        self.xi = 0.05                # Source: Table 1, main.tex — xi = 0.05 per stage
+        self.phi_sen_max = 0.30       # Source: Table 1, main.tex — phi_sen^max = 30% of population
+
         # === TELOMERE SENESCENCE PARAMETERS ===
-        self.max_divisions = 7  # Target number of divisions before senescence
+        self.max_divisions = 15  # Source: Table 1, main.tex — N (Hayflick limit, HUVEC) = 15-18 PD
         self.initial_telomere_mean = 100  # Average starting telomere length
         self.initial_telomere_std = 20  # Variability in starting length
 
@@ -110,8 +124,8 @@ class SimulationConfig:
         self.lambda_scale = 0.3  # Lambda scaling parameter
 
         # === POPULATION DYNAMICS PARAMETERS ===
-        self.proliferation_rate = 0 #0.0006
-        self.carrying_capacity = 200
+        self.proliferation_rate = 0.025  # Source: Table 1, main.tex — r = 0.02-0.03 h^-1 (nominal 0.025)
+        self.carrying_capacity = 5.5e4   # Source: Table 1, main.tex — K = 5-6e4 cells/cm^2 (nominal 5.5e4)
         self.death_rate_healthy = 0 #0.0001
         self.death_rate_senescent_tel = 0 #0.00033
         self.death_rate_senescent_stress = 0 #0.00042
