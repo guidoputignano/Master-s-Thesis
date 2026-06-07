@@ -596,7 +596,9 @@ RHO_STAT = 1.9          # Source: imaging — rho_stat = 1.9 (static aspect rati
 RHO_FLOW = 2.3          # Source: Table 1, main.tex — rho_flow (rho*) = 2.3
 RHO_STAT_STD = 0.67     # Source: imaging — aspect ratio spread, static (1.9 +/- 0.67)
 RHO_FLOW_STD = 0.78     # Source: imaging — aspect ratio spread, flow (2.3 +/- 0.78)
-THETA_STAT_DEG = 49.0   # Source: Table 1, main.tex — theta_stat = 49 deg
+THETA_STAT_DEG = 45.0   # static orientation baseline: isotropic (no preferred direction
+                        # with no flow), ~45 deg mean acute angle; immaterial since s(tau)=0
+                        # below tau_act (only the adapted theta*=20 deg is identified)
 THETA_FLOW_DEG = 20.0   # Source: Table 1, main.tex — theta_flow (theta*) = 20 deg
 THETA_STAT_STD_DEG = 25.0  # Source: imaging — orientation spread, static (49 +/- 25 deg)
 THETA_FLOW_STD_DEG = 14.0  # Source: imaging — orientation spread, flow (20 +/- 14 deg)
