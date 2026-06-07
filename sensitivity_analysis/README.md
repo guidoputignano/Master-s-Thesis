@@ -12,7 +12,8 @@ made to bring the code in line with the published paper, `main.tex`).
 | `audit.md` | Audit of model code vs. paper; basis for the corrections in `endothelial_simulation/models/` |
 | `sensitivity_oat.py` | Part A — one-at-a-time sensitivity of the temporal-dynamics scale |
 | `sensitivity_sobol.py` | Part B — global Sobol sensitivity of the reduced population ODE |
-| `run_all.py` | Runs Part A and Part B and prints a summary table |
+| `sensitivity_energy_weights.py` | Part C — sensitivity of the morphological energy weights `w_A:w_rho:w_phi` |
+| `run_all.py` | Runs Parts A, B and C and prints a summary table |
 | `figures/` | All output figures (600-dpi PDF) |
 
 ## Running
@@ -58,3 +59,23 @@ vanishes, so `alpha_gamma` has (correctly) negligible first-order influence; the
 senescent fraction is governed by the injury minimum `gamma_min`. Across the full
 sampled range `phi_sen(6h)` stays far below the 30 % limit, i.e. the constraint is
 robustly satisfied at the protective shear.
+
+## Part C — morphological energy weights (spatial scale)
+
+Table 1 fixes the configurational-energy weights of `eq:argmin` to the relative
+values `w_A : w_rho : w_phi = 1 : 8.5 : 5` and states they are *not independently
+identifiable* and that the solution is *insensitive to their exact magnitude
+within the morphological range of interest*. This part provides that
+verification. For several weight sets (equal, nominal, and factor-of-2
+perturbations of each mode) it runs the multi-configuration initialiser — where
+the weights act, by selecting the energy-minimising layout — followed by a 6 h
+adaptation at `tau = 1.4 Pa`, and records the converged population-mean aspect
+ratio `rho_bar`, mean alignment `phi_bar`, area coefficient of variation, and the
+partition gap fraction.
+
+Figures: `energy_weights_observables.pdf` (observables across the weight sets) and
+`energy_weights_sensitivity.pdf` (normalised +10 % sensitivity indices).
+
+The weights are kept fixed (as relative regularisers) rather than fitted, since
+they are non-identifiable; the analysis confirms the converged morphology is
+effectively independent of their exact magnitudes.
