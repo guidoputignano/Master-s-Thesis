@@ -60,8 +60,9 @@ class SpatialPropertiesModel:
                 3.0: 2.6       # NEW: Even more elongated at higher pressure
             },
             'orientation_mean': {
-                0.0: 49.0,     # Source: Table 1, main.tex — theta_stat = 49 degrees (static baseline)
-                1.4: 20.0,     # Source: Table 1, main.tex — theta_flow = 20 degrees (flow-adapted)
+                0.0: 45.0,     # isotropic static baseline (no preferred direction with no flow);
+                               # ~45 deg mean acute angle, immaterial since s(tau)=0 below tau_act
+                1.4: 20.0,     # Source: Table 1, main.tex — theta* = 20 degrees (flow-adapted)
                 3.0: 0.0       # NEW: Perfect flow alignment at higher pressure
             }
         }
