@@ -29,7 +29,11 @@ class Cell:
         self.biological_id = f"bio_{hash((position[0], position[1], cell_id)) % 100000}"
         self.position = position
         self.divisions = divisions
-        self.is_senescent = is_senescent
+        # Senescence is an irreversible cell state: once a cell becomes senescent
+        # it stays senescent (see the is_senescent property below). The backing
+        # field is set directly here; use reset_senescence() only for fresh
+        # initialisation of an all-healthy monolayer.
+        self._is_senescent = bool(is_senescent)
         self.senescence_cause = senescence_cause
 
         # Territory and morphology properties
@@ -95,6 +99,30 @@ class Cell:
         # Stress accumulation tracking
         self.accumulated_stress = 0.0
         self.stress_exposure_time = 0.0
+
+    @property
+    def is_senescent(self):
+        """Whether the cell is senescent (irreversible once True)."""
+        return self._is_senescent
+
+    @is_senescent.setter
+    def is_senescent(self, value):
+        """
+        Senescence is irreversible: a senescent cell can never revert to healthy.
+        Attempts to set it back to False on an already-senescent cell are ignored,
+        which guarantees persistence across every code path (population sync, MPC
+        reconciliation, etc.). Use reset_senescence() for fresh initialisation.
+        """
+        if value:
+            self._is_senescent = True
+        elif not self._is_senescent:
+            self._is_senescent = False
+        # else: already senescent -> ignore the reversion request
+
+    def reset_senescence(self):
+        """Force the cell back to healthy. ONLY for initial-condition setup."""
+        self._is_senescent = False
+        self.senescence_cause = None
 
     def calculate_final_stress(self, config, exposure_time=None):
         """

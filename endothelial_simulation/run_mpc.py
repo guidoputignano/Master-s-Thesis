@@ -34,7 +34,9 @@ def build_config():
     return config
 
 
-def main(n_control_steps=6):
+def main(n_control_steps=24):
+    # ~24 h conditioning so the morphology converges to the flow-adapted plateau
+    # (tau_adapt ~ 9 h, Table 1). Each step is a 1 h receding-horizon decision.
     config = build_config()
 
     print("=" * 70)
@@ -62,6 +64,7 @@ def main(n_control_steps=6):
     print("\n✅ MPC run complete.")
     print(f"   frames    : {len(results['frames'])} PDFs in {output_dir}/frames")
     print(f"   animation : {results['animation']}")
+    print(f"   dashboard : {results['dashboard']}")
     print(f"   summaries : mpc_tau_trajectory.pdf, mpc_phi_sen.pdf, mpc_morphology.pdf")
     return results
 

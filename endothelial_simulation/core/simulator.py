@@ -318,9 +318,10 @@ class Simulator:
             return
 
         # Start from an all-healthy monolayer so the composition is exact.
+        # reset_senescence() is the only sanctioned way to clear the otherwise
+        # irreversible senescent state, and is used here for initial setup only.
         for cell in cells:
-            cell.is_senescent = False
-            cell.senescence_cause = None
+            cell.reset_senescence()
 
         n_sen = int(round(fraction * n_total))
         # Split the senescent pool 70/30 (stress/telomere) by default.

@@ -592,10 +592,14 @@ from ..models.population_dynamics import population_reduced_rhs
 
 
 # ----- morphological targets (Table 1, main.tex) -----------------------------
-RHO_STAT = 1.9          # Source: Table 1, main.tex — rho_stat = 1.9
+RHO_STAT = 1.9          # Source: imaging — rho_stat = 1.9 (static aspect ratio)
 RHO_FLOW = 2.3          # Source: Table 1, main.tex — rho_flow (rho*) = 2.3
+RHO_STAT_STD = 0.67     # Source: imaging — aspect ratio spread, static (1.9 +/- 0.67)
+RHO_FLOW_STD = 0.78     # Source: imaging — aspect ratio spread, flow (2.3 +/- 0.78)
 THETA_STAT_DEG = 49.0   # Source: Table 1, main.tex — theta_stat = 49 deg
 THETA_FLOW_DEG = 20.0   # Source: Table 1, main.tex — theta_flow (theta*) = 20 deg
+THETA_STAT_STD_DEG = 25.0  # Source: imaging — orientation spread, static (49 +/- 25 deg)
+THETA_FLOW_STD_DEG = 14.0  # Source: imaging — orientation spread, flow (20 +/- 14 deg)
 RHO_SEN = 2.0           # senescent aspect ratio (no flow response)
 PHI_SEN_RANDOM = np.pi / 4.0  # mean acute alignment of randomly oriented senescent cells
 
@@ -651,7 +655,12 @@ class RecedingHorizonMPC:
         # Model parameters (Table 1, main.tex) read from config
         self.N = config.max_divisions
         self.r = config.proliferation_rate
-        self.K = config.carrying_capacity
+        # Contact inhibition g(N_E)=1/(1+N_E/K) needs K and N_E in the same units.
+        # Table 1 gives K as a density (cells/cm^2); the simulation tracks counts,
+        # so convert to a count-based capacity over the imaging-field area.
+        # area = (650 um)^2 = (0.065 cm)^2 = 4.225e-3 cm^2.
+        area_cm2 = (getattr(config, 'imaging_field_um', 650.0) / 1.0e4) ** 2
+        self.K = config.carrying_capacity * area_cm2   # Source: Table 1, K=5.5e4 cells/cm^2
         self.xi = config.xi
         self.gamma_min = config.gamma_min
         self.alpha_gamma = config.alpha_gamma
@@ -661,12 +670,30 @@ class RecedingHorizonMPC:
         self.theta_stat = np.radians(THETA_STAT_DEG)
         self.theta_flow = np.radians(THETA_FLOW_DEG)
 
-    # ---- target maps --------------------------------------------------------
+    # ---- target maps (population mean) --------------------------------------
     def rho_target(self, tau):
         return _gated(RHO_STAT, RHO_FLOW, tau, self.tau_act)
 
     def theta_target(self, tau):
         return _gated(self.theta_stat, self.theta_flow, tau, self.tau_act)
+
+    # ---- per-cell target spread (experimental +/- std, gated by flow) -------
+    def rho_std(self, tau):
+        """Aspect-ratio spread, interpolating static->flow with the activation gate."""
+        return _gated(RHO_STAT_STD, RHO_FLOW_STD, tau, self.tau_act)
+
+    def theta_std(self, tau):
+        """Orientation spread (rad), interpolating static->flow with the gate."""
+        return _gated(np.radians(THETA_STAT_STD_DEG),
+                      np.radians(THETA_FLOW_STD_DEG), tau, self.tau_act)
+
+    def cell_rho_target(self, tau, z):
+        """Per-cell aspect-ratio target = mean + z * std (z fixed per cell)."""
+        return max(1.0, self.rho_target(tau) + z * self.rho_std(tau))
+
+    def cell_theta_target(self, tau, z):
+        """Per-cell orientation target = mean + z * std (z fixed per cell)."""
+        return self.theta_target(tau) + z * self.theta_std(tau)
 
     # ---- one-step prediction (closed-form morphology + RK45 population) ------
     def predict_step(self, state, tau, dt=None):
@@ -891,7 +918,8 @@ def _summary_plots(log, out_dir):
     fig.tight_layout(); fig.savefig(os.path.join(out_dir, 'mpc_phi_sen.pdf'),
                                     format='pdf', bbox_inches='tight'); plt.close(fig)
 
-    # morphology: rho_bar and varphi_bar (deg) on twin axes
+    # morphology: rho_bar and alignment (deg) on twin axes
+    halign_deg = np.degrees(np.asarray(log['healthy_align']))
     fig, ax1 = plt.subplots(figsize=(5, 3.2))
     l1, = ax1.plot(t, rho, marker='o', ms=3, color='C0', label=r'$\bar{\rho}$')
     ax1.axhline(RHO_FLOW, ls=':', color='C0', lw=1)
@@ -899,13 +927,91 @@ def _summary_plots(log, out_dir):
     ax1.set_ylabel(r'mean aspect ratio $\bar{\rho}$', color='C0')
     ax1.tick_params(axis='y', labelcolor='C0')
     ax2 = ax1.twinx()
+    # population-mean alignment (main.tex phi_bar over all cells) and the
+    # healthy-cell alignment diagnostic (converges to the 20 deg flow target)
     l2, = ax2.plot(t, varphi_deg, marker='s', ms=3, color='C3',
-                   label=r'$\bar{\varphi}$')
-    ax2.set_ylabel(r'mean flow alignment $\bar{\varphi}$ (deg)', color='C3')
+                   label=r'$\bar{\varphi}$ (all cells)')
+    l3, = ax2.plot(t, halign_deg, marker='^', ms=3, color='C1', ls='--',
+                   label=r'$\bar{\varphi}_{\mathrm{healthy}}$')
+    ax2.axhline(THETA_FLOW_DEG, ls=':', color='C1', lw=1)
+    ax2.set_ylabel(r'flow alignment (deg)', color='C3')
     ax2.tick_params(axis='y', labelcolor='C3')
-    ax1.legend(handles=[l1, l2], loc='best')
+    ax1.legend(handles=[l1, l2, l3], loc='best')
     fig.tight_layout(); fig.savefig(os.path.join(out_dir, 'mpc_morphology.pdf'),
                                     format='pdf', bbox_inches='tight'); plt.close(fig)
+
+
+def _build_dashboard(frames, ts, mpc, out_dir):
+    """Composite animation: tessellation (left) + synced time series (right)."""
+    import matplotlib.pyplot as plt
+    import matplotlib.animation as animation
+
+    t = np.asarray(ts['t_h'])
+    tau = np.asarray(ts['tau'])
+    phi = np.asarray(ts['phi_sen'])
+    rho = np.asarray(ts['rho_bar'])
+    varphi_deg = np.degrees(np.asarray(ts['varphi_bar']))
+    halign_deg = np.degrees(np.asarray(ts['healthy_align']))
+    tmax = max(1.0, float(t[-1]))
+
+    fig = plt.figure(figsize=(11, 5))
+    gs = fig.add_gridspec(3, 2, width_ratios=[1.05, 1.0], hspace=0.45, wspace=0.28)
+    ax_img = fig.add_subplot(gs[:, 0])
+    ax_tau = fig.add_subplot(gs[0, 1])
+    ax_phi = fig.add_subplot(gs[1, 1])
+    ax_mor = fig.add_subplot(gs[2, 1])
+
+    ax_img.set_xticks([]); ax_img.set_yticks([])
+    ax_img.set_xlabel('tessellation (healthy / stress-sen / telomere-sen)')
+    im = ax_img.imshow(frames[0]['arr'], interpolation='nearest', origin='lower')
+    txt = ax_img.text(0.02, 0.98, '', transform=ax_img.transAxes, va='top', ha='left',
+                      fontsize=9, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+    # static reference lines / full faint trajectories
+    for ax in (ax_tau, ax_phi, ax_mor):
+        ax.set_xlim(0, tmax)
+    ax_tau.set_ylim(-0.05, 2.05); ax_tau.set_ylabel(r'$\tau$ (Pa)')
+    ax_phi.set_ylim(0, 0.35); ax_phi.set_ylabel(r'$\phi_{\mathrm{sen}}$')
+    ax_phi.axhline(0.30, ls='--', color='k', lw=1)
+    ax_mor.set_ylabel('align (deg)'); ax_mor.set_xlabel('time (h)')
+    ax_mor.axhline(THETA_FLOW_DEG, ls=':', color='C1', lw=1)
+    ax_mor.set_ylim(0, max(55, float(np.nanmax(varphi_deg)) + 5))
+    ax_tau_r = ax_mor.twinx(); ax_tau_r.set_ylabel(r'$\bar{\rho}$', color='C0')
+    ax_tau_r.set_ylim(1.8, 2.4); ax_tau_r.tick_params(axis='y', labelcolor='C0')
+
+    (ln_tau,) = ax_tau.plot([], [], color='C2', drawstyle='steps-post')
+    (ln_phi,) = ax_phi.plot([], [], color='C4', marker='', lw=1.5)
+    (ln_va,) = ax_mor.plot([], [], color='C3', lw=1.5, label=r'$\bar{\varphi}$ all')
+    (ln_ha,) = ax_mor.plot([], [], color='C1', ls='--', lw=1.5, label=r'$\bar{\varphi}$ healthy')
+    (ln_rho,) = ax_tau_r.plot([], [], color='C0', lw=1.5, label=r'$\bar{\rho}$')
+    ax_mor.legend(loc='upper right', fontsize=7)
+
+    def update(i):
+        f = frames[i]
+        n = f['snap']                      # number of ts points up to this frame
+        im.set_array(f['arr'])
+        txt.set_text(rf"$t={f['t_h']:.2f}$ h   $\tau={f['tau']:.2f}$ Pa   "
+                     rf"$\phi_{{sen}}={f['phi_sen']:.2f}$")
+        ln_tau.set_data(t[:n], tau[:n])
+        ln_phi.set_data(t[:n], phi[:n])
+        ln_va.set_data(t[:n], varphi_deg[:n])
+        ln_ha.set_data(t[:n], halign_deg[:n])
+        ln_rho.set_data(t[:n], rho[:n])
+        return im, txt, ln_tau, ln_phi, ln_va, ln_ha, ln_rho
+
+    anim = animation.FuncAnimation(fig, update, frames=len(frames), blit=False)
+    mp4 = os.path.join(out_dir, 'mpc_dashboard.mp4')
+    gif = os.path.join(out_dir, 'mpc_dashboard.gif')
+    try:
+        if animation.writers.is_available('ffmpeg'):
+            anim.save(mp4, writer=animation.FFMpegWriter(fps=6))
+            plt.close(fig)
+            return mp4
+    except Exception as e:
+        print(f"⚠️  ffmpeg dashboard failed ({e}); falling back to GIF.")
+    anim.save(gif, writer=animation.PillowWriter(fps=6))
+    plt.close(fig)
+    return gif
 
 
 # =============================================================================
@@ -985,10 +1091,18 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
 
     mpc = RecedingHorizonMPC(config)
     temporal = simulator.models['temporal']
-    spatial = simulator.models.get('spatial')
 
-    # logs (hour boundaries 0..n for outputs; per-step for tau)
-    log = {'t_h': [0.0], 'tau': [], 'phi_sen': [], 'rho_bar': [], 'varphi_bar': []}
+    # Per-cell heterogeneity: fix a standardised normal deviate per cell so each
+    # cell tracks its own target = mean + z * std (spread tightens under flow).
+    for c in simulator.grid.cells.values():
+        c._z_theta = float(np.random.randn())
+        c._z_rho = float(np.random.randn())
+
+    # step-resolution log (hour boundaries) and sub-frame time series (for the dashboard)
+    log = {'t_h': [0.0], 'tau': [], 'phi_sen': [], 'rho_bar': [], 'varphi_bar': [],
+           'healthy_align': []}
+    ts = {'t_h': [], 'tau': [], 'phi_sen': [], 'rho_bar': [], 'varphi_bar': [],
+          'healthy_align': []}
     frames = []
 
     # --- authoritative reduced state (re-estimated from the model, not from a
@@ -1003,8 +1117,10 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
     log['phi_sen'].append(phi0)
     log['rho_bar'].append(rho0)
     log['varphi_bar'].append(varphi0)
+    log['healthy_align'].append(flow_alignment_angle(x_state['theta_h']))
     print(f"▶ MPC start: phi_sen={phi0:.3f}, rho_bar={rho0:.3f}, "
-          f"varphi_bar={np.degrees(varphi0):.1f} deg")
+          f"varphi_bar={np.degrees(varphi0):.1f} deg, "
+          f"healthy_align={np.degrees(flow_alignment_angle(x_state['theta_h'])):.1f} deg")
 
     u_prev = tau0
 
@@ -1013,11 +1129,10 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
         u_opt, res = mpc.solve(x0, u_prev)
         tau_k = float(np.clip(u_opt[0], mpc.tau_min, mpc.tau_max))
         status = 'ok' if getattr(res, 'success', False) else 'fallback'
-        print(f"  step {k:02d}: tau={tau_k:.3f} Pa  (SLSQP {status}, J={res.fun:.4f})")
 
         simulator.set_constant_input(tau_k)
 
-        # capture per-cell start-of-interval actual morphology and targets
+        # capture per-cell start-of-interval morphology and per-cell targets
         cells = simulator.grid.cells
         start = {}
         for cid, c in cells.items():
@@ -1025,26 +1140,32 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
                 tgt_rho = RHO_SEN
                 tgt_theta = c.actual_orientation  # senescent: no flow response
             else:
-                tgt_rho = mpc.rho_target(tau_k)
-                tgt_theta = mpc.theta_target(tau_k)
+                tgt_rho = mpc.cell_rho_target(tau_k, getattr(c, '_z_rho', 0.0))
+                tgt_theta = mpc.cell_theta_target(tau_k, getattr(c, '_z_theta', 0.0))
             start[cid] = (c.actual_aspect_ratio, c.actual_orientation, tgt_rho, tgt_theta)
-
-        # population phi_sen prediction at the 1 h boundary (for the frame label)
-        x_end = mpc.predict_step(x0, tau_k)
-        phi_lbl, _, _ = mpc.outputs(x_end)
 
         # intermediate frames via the closed-form step response (eq:stepsolution)
         for m in render_minutes:
             th = m / 60.0
+            # reduced sub-state (for synced dashboard time series)
+            x_sub = mpc.predict_step(x0, tau_k, dt=th)
+            phi_s, rho_s, varphi_s = mpc.outputs(x_sub)
+            halign_s = flow_alignment_angle(x_sub['theta_h'])
+            t_abs = k + th
+            ts['t_h'].append(t_abs); ts['tau'].append(tau_k)
+            ts['phi_sen'].append(phi_s); ts['rho_bar'].append(rho_s)
+            ts['varphi_bar'].append(varphi_s); ts['healthy_align'].append(halign_s)
+
+            # update actual cell morphology toward each cell's own target
             for cid, c in cells.items():
                 rho0c, th0c, tgt_rho, tgt_theta = start[cid]
                 c.actual_aspect_ratio = temporal.relax_step(rho0c, tgt_rho, th)
                 c.actual_orientation = temporal.orientation_step(th0c, tgt_theta, th)
             simulator.grid._update_voronoi_tessellation(preserve_temporal_dynamics=True)
             path = os.path.join(frames_dir, f"mpc_k{k:02d}_t{m:02d}.pdf")
-            arr = _render_frame(simulator.grid, tau_k, k + th, phi_lbl, path)
-            frames.append({'arr': arr.copy(), 't_h': k + th, 'tau': tau_k,
-                           'phi_sen': phi_lbl, 'path': path})
+            arr = _render_frame(simulator.grid, tau_k, t_abs, phi_s, path)
+            frames.append({'arr': arr.copy(), 't_h': t_abs, 'tau': tau_k,
+                           'phi_sen': phi_s, 'snap': len(ts['t_h']), 'path': path})
 
         # advance the cells (for visualisation only) to the end of the interval
         for cid, c in cells.items():
@@ -1055,7 +1176,7 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
             c.target_orientation = tgt_theta
 
         # advance the authoritative reduced state by 1 h (eq:flowmap)
-        x_state = x_end
+        x_state = mpc.predict_step(x0, tau_k)
         pop_end = x_state['pop']
         pm = simulator.models['population']
         pm.state['E'] = list(pop_end[:mpc.N + 1])
@@ -1067,19 +1188,27 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
 
         # log model-propagated outputs at the hour boundary
         phi_m, rho_m, varphi_m = mpc.outputs(x_state)
+        halign_m = flow_alignment_angle(x_state['theta_h'])
         log['t_h'].append(k + 1.0)
         log['tau'].append(tau_k)
         log['phi_sen'].append(phi_m)
         log['rho_bar'].append(rho_m)
         log['varphi_bar'].append(varphi_m)
+        log['healthy_align'].append(halign_m)
         u_prev = tau_k
+        print(f"  step {k:02d}: tau={tau_k:.3f} Pa  (SLSQP {status}, J={res.fun:.3f})  "
+              f"phi_sen={phi_m:.3f}  rho_bar={rho_m:.3f}  "
+              f"healthy_align={np.degrees(halign_m):.1f} deg")
 
     # assemble outputs
-    print(f"🎞️  Assembling animation from {len(frames)} frames ...")
+    print(f"🎞️  Assembling tessellation animation from {len(frames)} frames ...")
     anim_path = _build_animation(frames, output_dir)
     print(f"   animation -> {anim_path}")
+    print(f"🖥️  Assembling composite dashboard ...")
+    dash_path = _build_dashboard(frames, ts, mpc, output_dir)
+    print(f"   dashboard -> {dash_path}")
     _summary_plots(log, output_dir)
     print(f"📈 Summary figures written to {output_dir}")
 
-    return {'log': log, 'frames': [f['path'] for f in frames],
-            'animation': anim_path, 'output_dir': output_dir}
+    return {'log': log, 'ts': ts, 'frames': [f['path'] for f in frames],
+            'animation': anim_path, 'dashboard': dash_path, 'output_dir': output_dir}

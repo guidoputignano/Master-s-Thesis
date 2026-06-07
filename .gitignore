@@ -53,3 +53,6 @@ results/figures/*
 
 # Environment variables
 .env
+
+# Generated MPC frame PDFs (regenerable via run_mpc.py)
+endothelial_simulation/figures/frames/
