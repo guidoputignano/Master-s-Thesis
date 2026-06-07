@@ -4,6 +4,64 @@ Population dynamics model for endothelial cell mechanotransduction.
 import numpy as np
 
 
+def gamma_tau_quadratic(tau, gamma_min, alpha_gamma, tau_opt):
+    """
+    U-shaped quadratic senescence-induction rate (eq:gamma_quad, main.tex):
+
+        gamma_tau(tau) = gamma_min + alpha_gamma * (tau - tau_opt)**2
+
+    Pure-numpy helper with no object access, so the MPC optimiser can call it
+    inside the ODE right-hand side without Python/attribute overhead.
+    """
+    return gamma_min + alpha_gamma * (tau - tau_opt) ** 2
+
+
+def population_reduced_rhs(state, tau, r, K, xi, gamma_min, alpha_gamma, tau_opt, N):
+    """
+    Standalone right-hand side of the reduced population ODE (eq:reduced, main.tex).
+
+    This is the control-oriented kernel used by the MPC optimiser: it takes only
+    numpy arrays / scalars (no Grid, no model object) so scipy.integrate.solve_ivp
+    can call it with minimal overhead.
+
+        dE_i/dt   = 2 r g(N_E) E_{i-1} - r g(N_E) E_i - gamma_tau(tau)(1+xi i) E_i
+        dS_tel/dt = r g(N_E) E_N
+        dS_str/dt = sum_i gamma_tau(tau)(1+xi i) E_i
+        g(N_E)    = 1 / (1 + N_E / K)                      (eq:density)
+        gamma_tau = gamma_min + alpha_gamma (tau - tau_opt)^2   (eq:gamma_quad)
+
+    Parameters:
+        state: array [E_0, ..., E_N, S_tel, S_str]  (length N + 3)
+        tau:   wall shear stress (Pa)
+        r, K, xi, gamma_min, alpha_gamma, tau_opt, N: scalar parameters (Table 1)
+
+    Returns:
+        numpy array of derivatives, same layout as `state`.
+    """
+    state = np.asarray(state, dtype=float)
+    E = state[:N + 1]
+    N_E = float(E.sum())
+    g = 1.0 / (1.0 + N_E / K)                                   # eq:density
+    gamma = gamma_tau_quadratic(tau, gamma_min, alpha_gamma, tau_opt)  # eq:gamma_quad
+
+    stage = np.arange(N + 1, dtype=float)
+    sen_rate = gamma * (1.0 + xi * stage)                       # gamma_tau (1 + xi i)
+
+    dE = np.empty(N + 1)
+    # division in: 2 r g E_{i-1}; division out: r g E_i; senescence loss: sen_rate E_i
+    dE[0] = -r * g * E[0] - sen_rate[0] * E[0]
+    dE[1:] = 2.0 * r * g * E[:-1] - r * g * E[1:] - sen_rate[1:] * E[1:]
+
+    dS_tel = r * g * E[N]                                       # terminal division -> S_tel
+    dS_str = float(np.sum(sen_rate * E))                        # stress-induced senescence
+
+    dstate = np.empty_like(state)
+    dstate[:N + 1] = dE
+    dstate[N + 1] = dS_tel
+    dstate[N + 2] = dS_str
+    return dstate
+
+
 class PopulationDynamicsModel:
     """
     Model for endothelial cell population dynamics under mechanical stimuli.
@@ -263,34 +321,14 @@ class PopulationDynamicsModel:
         Returns:
             numpy array of time derivatives, same layout as `state`.
         """
-        state = np.asarray(state, dtype=float)
-        N = self.max_divisions
-        E = state[:N + 1]
-        S_tel = state[N + 1]
-        S_str = state[N + 2]
-
-        N_E = float(np.sum(E))
-        g = self.calculate_density_factor(N_E)          # eq:density
-        gamma_tau = self.calculate_shear_stress_effect(tau)  # eq:gamma_quad
-
-        dE = np.zeros(N + 1)
-        dS_str = 0.0
-        for i in range(N + 1):
-            division_in = 2.0 * self.r * g * E[i - 1] if i > 0 else 0.0
-            division_out = self.r * g * E[i]
-            sen_rate = gamma_tau * (1.0 + self.xi * i)   # Source: Table 1 — xi = 0.05
-            dE[i] = division_in - division_out - sen_rate * E[i]
-            dS_str += sen_rate * E[i]
-
-        # Division at the terminal stage feeds replicative senescence (eq:Stel)
-        dS_tel = self.r * g * E[N]
-        # The terminal division_out above already removed E_N; route it to S_tel.
-
-        dstate = np.empty_like(state)
-        dstate[:N + 1] = dE
-        dstate[N + 1] = dS_tel
-        dstate[N + 2] = dS_str
-        return dstate
+        # Delegate to the standalone numpy-only kernel (see population_reduced_rhs).
+        # Source: Table 1, main.tex — r, K, xi, gamma_min, alpha_gamma, tau_opt
+        return population_reduced_rhs(
+            state, tau,
+            r=self.r, K=self.K, xi=self.xi,
+            gamma_min=self.gamma_min, alpha_gamma=self.alpha_gamma,
+            tau_opt=self.tau_opt, N=self.max_divisions,
+        )
 
     def calculate_division_capacity(self, division_stage):
         """

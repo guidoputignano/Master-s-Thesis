@@ -218,8 +218,10 @@ class Cell:
                 max_pixels = int(max_allowed_area)
                 pixel_list = [pixel_list[i] for i in sorted_indices[:max_pixels]]
 
-            print(f"⚠️  Cell {self.cell_id} expansion limited: {requested_area:.0f} → {len(pixel_list):.0f} pixels "
-                  f"({'senescent' if self.is_senescent else 'healthy'} limit: {max_allowed_area:.0f})")
+            # Per-cell expansion-limit notice disabled (fires for many cells every
+            # tessellation; pixel_ownership stays gap-free regardless of the clip).
+            # print(f"⚠️  Cell {self.cell_id} expansion limited: {requested_area:.0f} → {len(pixel_list):.0f} pixels "
+            #       f"({'senescent' if self.is_senescent else 'healthy'} limit: {max_allowed_area:.0f})")
 
         # Assign territory
         self.territory_pixels = pixel_list
