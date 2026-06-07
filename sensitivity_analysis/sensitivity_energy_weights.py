@@ -88,6 +88,12 @@ def run_once(weights, seed=0):
     cfg = _build_config()
     with contextlib.redirect_stdout(io.StringIO()):
         sim = Simulator(cfg)
+        # The morphological energy weights act only when SELECTING among candidate
+        # configurations (calculate_biological_energy), not in the distance-based
+        # Voronoi geometry. The gradient position optimiser is O(N^2 * pixels) and
+        # dominates runtime without affecting what we test, so disable it here; the
+        # tessellation remains a gap-free partition from the Poisson seeds.
+        sim.grid.optimize_cell_positions = lambda *a, **k: None
         # the swept quantity: morphological energy weights used by eq:argmin scoring
         sim.grid.energy_weights["area"] = weights["area"]
         sim.grid.energy_weights["aspect_ratio"] = weights["aspect_ratio"]
@@ -95,7 +101,7 @@ def run_once(weights, seed=0):
         sim.set_constant_input(TAU_INPUT)
         sim.initialize_with_multiple_configurations(
             cell_count=CELL_COUNT, num_configurations=NUM_CONFIGS,
-            optimization_iterations=1, save_analysis=False)
+            optimization_iterations=0, save_analysis=False)
         sim.run(duration=DURATION_MIN)
 
         props = sim.grid.get_cell_properties()
