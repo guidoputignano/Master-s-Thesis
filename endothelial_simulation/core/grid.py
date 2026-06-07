@@ -181,7 +181,12 @@ class Grid:
         alpha = 0.2  # Area control strength
         beta = 1.0  # Orientation influence strength (increased for stronger visual impact)
         gamma = 0.4  # Aspect ratio control strength
-        tau_hole = 15.0  # Hole creation threshold
+        # Space-filling partition (eq:argmin, main.tex): the tessellation must tile the
+        # whole domain with no gaps. With holes disabled for the MPC run we never want a
+        # pixel left unassigned, so the hole-creation distance threshold is set to +inf.
+        # Lower this only if biological holes are explicitly required.
+        # Source: Table 1, main.tex — phi_sen^max constraint run with config.enable_holes = False
+        tau_hole = np.inf if not getattr(self.config, 'enable_holes', False) else 15.0
 
         seed_points = []
         cell_ids = []
@@ -842,9 +847,9 @@ class Grid:
         for cell in self.cells.values():
             max_area = cell.target_area * (2.0 if not cell.is_senescent else 3.0)
 
-            # ADD THIS LINE to see what's happening:
-            print(
-                f"🐛 Cell {cell.cell_id}: actual={cell.actual_area} max={max_area} exceeds={cell.actual_area > max_area}")
+            # Per-cell debug print disabled (kept only warnings / end-of-step summaries).
+            # print(
+            #     f"🐛 Cell {cell.cell_id}: actual={cell.actual_area} max={max_area} exceeds={cell.actual_area > max_area}")
 
             if cell.actual_area > max_area:
                 # Keep only the pixels closest to cell center
@@ -895,7 +900,8 @@ class Grid:
 
             divisions = division_distribution()
             target_area = area_distribution()
-            print(f"🐛 INITIAL: Cell will be created with target_area = {target_area}")
+            # Per-cell debug print disabled (kept only warnings / end-of-step summaries).
+            # print(f"🐛 INITIAL: Cell will be created with target_area = {target_area}")
 
             is_senescent = False
             senescence_cause = None

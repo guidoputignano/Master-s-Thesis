@@ -177,6 +177,9 @@ class Simulator:
         # Populate grid with initial cells
         self.grid.populate_grid(cell_count, area_distribution=area_distribution)
 
+        # Apply the prescribed initial senescent composition (phi_sen(0) = 0.20, 70/30 split)
+        self._apply_initial_senescence()
+
         # Initialize cell properties for current pressure
         self._initialize_cell_properties_for_pressure()
 
@@ -237,6 +240,9 @@ class Simulator:
             verbose=True
         )
 
+        # Apply the prescribed initial senescent composition (phi_sen(0) = 0.20, 70/30 split)
+        self._apply_initial_senescence()
+
         # Initialize cell properties for current pressure
         self._initialize_cell_properties_for_pressure()
 
@@ -286,6 +292,61 @@ class Simulator:
             print(f"🚀 Using standard initialization for {cell_count} cells")
             return self.initialize(cell_count)
 
+    def _apply_initial_senescence(self, fraction=None, stress_fraction=None,
+                                  telomere_fraction=None):
+        """
+        Set the initial senescent composition of the monolayer.
+
+        Marks a fraction phi_sen(0) of the cells as senescent, split into
+        stress-induced (S_str) and telomere-induced (S_tel) compartments.
+
+        Defaults (Source: project knowledge / Table 1, main.tex):
+            phi_sen(0) = 0.20  (passage-6 HUVEC, PDL 15)
+            70% of the senescent cells are stress-induced (S_str)
+            30% of the senescent cells are telomere-induced (S_tel)
+        """
+        if fraction is None:
+            fraction = getattr(self.config, 'initial_senescent_fraction', 0.0)
+        if stress_fraction is None:
+            stress_fraction = getattr(self.config, 'senescent_stress_fraction', 0.70)
+        if telomere_fraction is None:
+            telomere_fraction = getattr(self.config, 'senescent_telomere_fraction', 0.30)
+
+        cells = list(self.grid.cells.values())
+        n_total = len(cells)
+        if n_total == 0 or fraction <= 0.0:
+            return
+
+        # Start from an all-healthy monolayer so the composition is exact.
+        # reset_senescence() is the only sanctioned way to clear the otherwise
+        # irreversible senescent state, and is used here for initial setup only.
+        for cell in cells:
+            cell.reset_senescence()
+
+        n_sen = int(round(fraction * n_total))
+        # Split the senescent pool 70/30 (stress/telomere) by default.
+        denom = stress_fraction + telomere_fraction
+        n_stress = int(round(n_sen * stress_fraction / denom)) if denom > 0 else 0
+        n_tel = n_sen - n_stress
+
+        order = np.random.permutation(n_total)
+        selected = order[:n_sen]
+
+        for k, idx in enumerate(selected):
+            cell = cells[idx]
+            cell.is_senescent = True
+            if k < n_stress:
+                cell.senescence_cause = 'stress'           # Source: 70% of senescent = S_str
+            else:
+                cell.senescence_cause = 'telomere'         # Source: 30% of senescent = S_tel
+                # Telomere-induced cells have exhausted their replicative capacity.
+                cell.divisions = self.config.max_divisions
+                cell.telomere_length = 0.0
+
+        achieved = n_sen / n_total if n_total else 0.0
+        print(f"🧬 Initial senescence set: phi_sen(0)={achieved:.3f} "
+              f"({n_sen}/{n_total} cells: {n_stress} stress, {n_tel} telomere)")
+
     def _initialize_cell_properties_for_pressure(self):
         """Initialize cell properties for current pressure."""
         current_pressure = self.input_pattern.get('value', 0.0)
@@ -308,7 +369,8 @@ class Simulator:
             )
 
             cell.target_area = target_area
-            print(f"🐛 PRESSURE_UPDATE: Cell {cell_id}: {old_target} → {target_area}")
+            # Per-cell debug print disabled (kept only warnings / end-of-step summaries).
+            # print(f"🐛 PRESSURE_UPDATE: Cell {cell_id}: {old_target} → {target_area}")
             cell.target_aspect_ratio = target_aspect_ratio
             cell.target_orientation = target_orientation
             cell.actual_aspect_ratio = target_aspect_ratio

@@ -23,15 +23,36 @@ class SpatialPropertiesModel:
         self.config = config
         self.temporal_model = temporal_model
 
-        # Real experimental data converted to pixels
-        # Pixel spacing: 0.429 μm/pixel, so 1 pixel² = 0.184041 μm²
+        # --- Physical area -> computational-pixel conversion (Table 1, main.tex) ---
+        # The bioreactor domain is a 650x650 um imaging field mapped onto the display
+        # grid; the tessellation runs on a coarser computational grid.
+        #   pixel_scale     = 650.0 / grid_display_width_px      [um per display pixel]
+        #   target_area_comp = area_um2 / pixel_scale**2 / computation_scale**2  [comp px^2]
+        grid_display_width_px = config.grid_size[0]
+        self.computation_scale = getattr(config, 'computation_scale', 4)
+        self.pixel_scale = getattr(
+            config, 'pixel_scale_um',
+            getattr(config, 'imaging_field_um', 650.0) / grid_display_width_px
+        )  # um per display pixel
 
-        # Control cell parameters at different pressures (in pixels)
+        def _um2_to_comp(area_um2):
+            """Convert a physical cell area (um^2) to computational pixels^2."""
+            return area_um2 / (self.pixel_scale ** 2) / (self.computation_scale ** 2)
+
+        self._um2_to_comp = _um2_to_comp
+
+        # Physical cell areas in um^2 (Table 1, main.tex), converted to comp pixels.
+        area_healthy_comp = _um2_to_comp(2354.0)   # Source: Table 1, main.tex — A_E* (healthy HUVEC) = 2354 um^2
+        area_sen_small_comp = _um2_to_comp(2207.0)  # Source: Table 1, main.tex — small senescent area = 2207 um^2
+        area_sen_large_comp = _um2_to_comp(8626.0)  # Source: Table 1, main.tex — large senescent area = 8626 um^2
+
+        # Control (healthy) cell parameters at different pressures.
+        # Area is the healthy HUVEC target at every shear level (Table 1, main.tex — A_E* = 2354 um^2).
         self.control_params = {
             'area': {
-                0.0: 3216,    # 2155 μm² static
-                1.4: 3216,    # Assume same area under flow (not measured separately)
-                3.0: 3216     # NEW: Extended range - maintain same area
+                0.0: area_healthy_comp,   # Source: Table 1, main.tex — A_E* = 2354 um^2
+                1.4: area_healthy_comp,   # Source: Table 1, main.tex — A_E* = 2354 um^2
+                3.0: area_healthy_comp    # Source: Table 1, main.tex — A_E* = 2354 um^2
             },
             'aspect_ratio': {
                 0.0: 1.9,      # Static control
@@ -39,16 +60,16 @@ class SpatialPropertiesModel:
                 3.0: 2.6       # NEW: Even more elongated at higher pressure
             },
             'orientation_mean': {
-                0.0: 45.0,     # Random orientation (degrees)
-                1.4: 20.0,     # Source: Table 1, main.tex — theta* = 20 degrees (flow-adapted)
+                0.0: 49.0,     # Source: Table 1, main.tex — theta_stat = 49 degrees (static baseline)
+                1.4: 20.0,     # Source: Table 1, main.tex — theta_flow = 20 degrees (flow-adapted)
                 3.0: 0.0       # NEW: Perfect flow alignment at higher pressure
             }
         }
 
-        # Senescent cell parameters (in pixels)
+        # Senescent cell parameters (areas converted from um^2 to comp pixels).
         self.senescent_params = {
-            'area_small': 3216,     # 2207 μm² (< 5000 μm²)
-            'area_large': 12864,     # 8626 μm² (≥ 5000 μm²)
+            'area_small': area_sen_small_comp,   # Source: Table 1, main.tex — small senescent area = 2207 um^2
+            'area_large': area_sen_large_comp,   # Source: Table 1, main.tex — large senescent area = 8626 um^2
             'aspect_ratio': {
                 0.0: 1.9,            # Static senescent
                 1.4: 2.0,            # Flow senescent (no significant change)
@@ -234,7 +255,8 @@ class SpatialPropertiesModel:
             # Control cells: use deterministic experimental area
             base_area = self.interpolate_pressure_effect(self.control_params['area'], pressure)
             # REMOVED: artificial biological variability
-            result = max(1000, base_area)  # Minimum 1000 pixels²
+            # Floor at 1 comp-pixel (areas are now in computational pixels, ~365 px for A_E*).
+            result = max(1.0, base_area)
             #print(f"Control area: pressure={pressure}, deterministic result={result:.0f}")
             return result
 
@@ -401,8 +423,11 @@ class SpatialPropertiesModel:
             'aspect_ratio_adaptation': aspect_ratio_adaptation,
 
             # Additional metrics
+            # "Large" senescent cells are those above the 5000 um^2 boundary
+            # (Table 1, main.tex), expressed in computational pixels.
             'large_senescent_fraction': len([c for c in cells_dict.values()
-                                             if c.is_senescent and getattr(c, 'target_area', 0) > 27174]) / len(
+                                             if c.is_senescent and getattr(c, 'target_area', 0)
+                                             > self._um2_to_comp(5000.0)]) / len(
                 cells_dict),
             'pressure': pressure,
 

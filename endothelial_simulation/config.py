@@ -13,8 +13,28 @@ class SimulationConfig:
         self.simulation_duration = 360  # minutes (6 hours)
         self.time_step = 1.0  # minutes
         self.time_unit = "minutes"
-        self.initial_cell_count = 20
-        self.grid_size = (1024, 1024)  # pixels
+        self.grid_size = (1024, 1024)  # pixels (display resolution)
+
+        # === IMAGING FIELD / PIXEL SCALE (Table 1, main.tex) ===
+        # The bioreactor domain corresponds to a 650x650 um imaging field at 20x.
+        self.imaging_field_um = 650.0          # Source: Table 1, main.tex — imaging field = 650 um (20x)
+        self.computation_scale = 4             # comp pixels per display pixel (per axis); see Grid
+        # micrometres per display pixel
+        self.pixel_scale_um = self.imaging_field_um / self.grid_size[0]  # = 650/1024 um/px
+
+        # Confluent cell count derived from the healthy HUVEC area (A_E* = 2354 um^2):
+        #   target_cell_count = round(650 * 650 / 2354) ~ 180
+        # Source: Table 1, main.tex — A_E* = 2354 um^2 ; imaging field 650x650 um
+        self.initial_cell_count = round(
+            self.imaging_field_um * self.imaging_field_um / 2354.0
+        )  # = 180 cells
+
+        # === INITIAL SENESCENCE COMPOSITION (passage 6 HUVEC, PDL 15) ===
+        # Source: NMR senescence literature (project knowledge) — phi_sen(0) = 0.20 at PDL 15
+        self.initial_senescent_fraction = 0.20   # phi_sen(0) = 20%
+        # Of the senescent fraction: 70% stress-induced (S_str), 30% telomere-induced (S_tel)
+        self.senescent_stress_fraction = 0.70    # Source: project spec — S_str share of senescent
+        self.senescent_telomere_fraction = 0.30  # Source: project spec — S_tel share of senescent
 
         # === EVENT-DRIVEN SYSTEM (MAIN FEATURE) ===
         self.use_event_driven_system = False  # Always enabled
@@ -92,7 +112,7 @@ class SimulationConfig:
         self.phi_sen_max = 0.30       # Source: Table 1, main.tex — phi_sen^max = 30% of population
 
         # === TELOMERE SENESCENCE PARAMETERS ===
-        self.max_divisions = 15  # Source: Table 1, main.tex — N (Hayflick limit, HUVEC) = 15-18 PD
+        self.max_divisions = 16  # Source: Table 1, main.tex — N (Hayflick limit, HUVEC) = 16 (midpoint of [15,18] PD)
         self.initial_telomere_mean = 100  # Average starting telomere length
         self.initial_telomere_std = 20  # Variability in starting length
 
