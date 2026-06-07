@@ -112,7 +112,7 @@ class SimulationConfig:
         self.phi_sen_max = 0.30       # Source: Table 1, main.tex — phi_sen^max = 30% of population
 
         # === TELOMERE SENESCENCE PARAMETERS ===
-        self.max_divisions = 15  # Source: Table 1, main.tex — N (Hayflick limit, HUVEC) = 15-18 PD
+        self.max_divisions = 16  # Source: Table 1, main.tex — N (Hayflick limit, HUVEC) = 16 (midpoint of [15,18] PD)
         self.initial_telomere_mean = 100  # Average starting telomere length
         self.initial_telomere_std = 20  # Variability in starting length
 

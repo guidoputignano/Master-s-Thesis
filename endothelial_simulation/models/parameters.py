@@ -34,7 +34,7 @@ class ModelParameters:
         self.tau_opt = 1.4            # Source: Table 1, main.tex — tau_opt = 1.4 Pa
         self.xi = 0.05                # Source: Table 1, main.tex — xi = 0.05 per stage
         # baseline (static, no-flow) aspect ratio for the gated interpolation
-        self.aspect_ratio_static = 1.0
+        self.aspect_ratio_static = 1.9  # Source: Table 1, main.tex — rho_stat = 1.9 (static baseline)
 
         # ------------------------------
         # Temporal dynamics parameters
@@ -74,7 +74,7 @@ class ModelParameters:
         # Population dynamics parameters
         # ------------------------------
         # Maximum number of divisions a cell can undergo
-        self.max_divisions = 15  # Source: Table 1, main.tex — N (Hayflick limit) = 15-18 PD
+        self.max_divisions = 16  # Source: Table 1, main.tex — N (Hayflick limit) = 16 (midpoint of [15,18] PD)
 
         # Base cell division rate (per hour)
         self.division_rate = 0.025  # Source: Table 1, main.tex — r = 0.02-0.03 h^-1 (nominal)
