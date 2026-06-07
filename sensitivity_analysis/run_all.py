@@ -4,6 +4,7 @@ Run the full sensitivity and robustness analysis and print a summary table.
   Part A: one-at-a-time sensitivity of the temporal-dynamics scale  (sensitivity_oat)
   Part B: global Sobol sensitivity of the population scale          (sensitivity_sobol)
   Part C: sensitivity of the morphological energy weights          (sensitivity_energy_weights)
+  Part D: sensitivity of the MPC cost weights                      (sensitivity_mpc_weights)
 
 All figures are written to sensitivity_analysis/figures/ as 600-dpi PDFs.
 Usage:
@@ -15,7 +16,7 @@ import os
 import numpy as np
 
 from sensitivity_analysis import (sensitivity_oat, sensitivity_sobol,
-                                  sensitivity_energy_weights)
+                                  sensitivity_energy_weights, sensitivity_mpc_weights)
 
 np.random.seed(42)
 
@@ -80,6 +81,25 @@ def main(make_snapshots=True, n_base=sensitivity_sobol.N_BASE):
     for k, d in ew["sensitivity"].items():
         print(f"    {k:<14}{d['rho_bar']:>12.4f}{d['phi_bar']:>12.4f}")
 
+    # ---- Part D ------------------------------------------------------------
+    print("\n[Part D] MPC cost-weight sensitivity (control law) ...")
+    mw = sensitivity_mpc_weights.run()
+    al = [r["align_final"] for r in mw["results"].values()]
+    tm = [r["tau_mean"] for r in mw["results"].values()]
+    print("\nClosed-loop outcomes across MPC cost-weight sets (24 h):")
+    print(f"    {'weight set':<14}{'align':>8}{'rho':>7}{'phi_f':>8}{'tau_m':>8}")
+    _hr(46)
+    for name, r in mw["results"].items():
+        print(f"    {name:<14}{r['align_final']:>8.1f}{r['rho_final']:>7.3f}"
+              f"{r['phisen_final']:>8.3f}{r['tau_mean']:>8.3f}")
+    print(f"\n    spread: align range = {max(al)-min(al):.1f} deg, "
+          f"mean-tau range = {max(tm)-min(tm):.3f} Pa")
+    print("\nNormalised sensitivity indices (+10% on each cost weight):")
+    print(f"    {'weight':<10}{'S[align]':>10}{'S[phi_sen]':>12}{'S[tau]':>9}")
+    _hr(42)
+    for k, d in mw["sensitivity"].items():
+        print(f"    {k:<10}{d['align_final']:>10.3f}{d['phisen_final']:>12.3f}{d['tau_mean']:>9.3f}")
+
     # ---- figure inventory --------------------------------------------------
     fig_dir = sensitivity_oat.FIG_DIR
     print("\nFigures written to:", fig_dir)
@@ -87,7 +107,7 @@ def main(make_snapshots=True, n_base=sensitivity_sobol.N_BASE):
         if f.endswith(".pdf"):
             print("    -", f)
     print("=" * 72)
-    return {"oat": oat, "sobol": sob, "energy_weights": ew}
+    return {"oat": oat, "sobol": sob, "energy_weights": ew, "mpc_weights": mw}
 
 
 if __name__ == "__main__":

@@ -13,7 +13,8 @@ made to bring the code in line with the published paper, `main.tex`).
 | `sensitivity_oat.py` | Part A — one-at-a-time sensitivity of the temporal-dynamics scale |
 | `sensitivity_sobol.py` | Part B — global Sobol sensitivity of the reduced population ODE |
 | `sensitivity_energy_weights.py` | Part C — sensitivity of the morphological energy weights `w_A:w_rho:w_phi` |
-| `run_all.py` | Runs Parts A, B and C and prints a summary table |
+| `sensitivity_mpc_weights.py` | Part D — sensitivity of the MPC cost weights `w_phi:w_rho:w_varphi:w_u` |
+| `run_all.py` | Runs Parts A–D and prints a summary table |
 | `figures/` | All output figures (600-dpi PDF) |
 
 ## Running
@@ -79,3 +80,19 @@ Figures: `energy_weights_observables.pdf` (observables across the weight sets) a
 The weights are kept fixed (as relative regularisers) rather than fitted, since
 they are non-identifiable; the analysis confirms the converged morphology is
 effectively independent of their exact magnitudes.
+
+## Part D — MPC cost weights (control law)
+
+The receding-horizon controller (`eq:ocp`, `eq:stagecost`) minimises
+`J = w_phi*phi_sen^2 + w_rho*(rho_bar-2.3)^2 + w_varphi*varphi_bar^2 + w_u*dtau^2`
+with nominal weights `10 : 1 : 5 : 0.1`. These weights enter the control law
+directly (unlike the Part-C morphological energy weights), so this part
+quantifies how the optimised protocol and the closed-loop outcome respond to
+them. For each weight set (nominal and factor-of-2 perturbations of each weight)
+the receding-horizon loop is run for 24 h on the *reduced* prediction model
+(population via `solve_ivp`, morphology via the closed-form step response — no
+tessellation rendering), recording the final healthy alignment, mean aspect
+ratio, final/peak senescent fraction, mean shear and total input variation, plus
+normalised +10 % sensitivity indices.
+
+Figures: `mpc_weights_outcomes.pdf` and `mpc_weights_sensitivity.pdf`.
