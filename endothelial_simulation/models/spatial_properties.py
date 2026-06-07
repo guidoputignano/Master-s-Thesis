@@ -423,8 +423,11 @@ class SpatialPropertiesModel:
             'aspect_ratio_adaptation': aspect_ratio_adaptation,
 
             # Additional metrics
+            # "Large" senescent cells are those above the 5000 um^2 boundary
+            # (Table 1, main.tex), expressed in computational pixels.
             'large_senescent_fraction': len([c for c in cells_dict.values()
-                                             if c.is_senescent and getattr(c, 'target_area', 0) > 27174]) / len(
+                                             if c.is_senescent and getattr(c, 'target_area', 0)
+                                             > self._um2_to_comp(5000.0)]) / len(
                 cells_dict),
             'pressure': pressure,
 
