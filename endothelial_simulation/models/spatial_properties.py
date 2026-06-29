@@ -62,8 +62,9 @@ class SpatialPropertiesModel:
             'orientation_mean': {
                 0.0: 45.0,     # isotropic static baseline (no preferred direction with no flow);
                                # ~45 deg mean acute angle, immaterial since s(tau)=0 below tau_act
-                1.4: 20.0,     # Source: Table 1, main.tex — theta* = 20 degrees (flow-adapted)
-                3.0: 0.0       # NEW: Perfect flow alignment at higher pressure
+                1.4: 0.0,      # orientation target theta* = 0 deg (parallel / perfect alignment);
+                               # re-calibrated (20 deg is now the t=6 h transient, not the plateau)
+                3.0: 0.0       # Perfect flow alignment at higher pressure
             }
         }
 

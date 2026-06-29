@@ -596,10 +596,14 @@ RHO_STAT = 1.9          # Source: imaging — rho_stat = 1.9 (static aspect rati
 RHO_FLOW = 2.3          # Source: Table 1, main.tex — rho_flow (rho*) = 2.3
 RHO_STAT_STD = 0.67     # Source: imaging — aspect ratio spread, static (1.9 +/- 0.67)
 RHO_FLOW_STD = 0.78     # Source: imaging — aspect ratio spread, flow (2.3 +/- 0.78)
-THETA_STAT_DEG = 45.0   # static orientation baseline: isotropic (no preferred direction
-                        # with no flow), ~45 deg mean acute angle; immaterial since s(tau)=0
-                        # below tau_act (only the adapted theta*=20 deg is identified)
-THETA_FLOW_DEG = 20.0   # Source: Table 1, main.tex — theta_flow (theta*) = 20 deg
+THETA_STAT_DEG = 45.0   # static orientation baseline AND initial condition: isotropic (no
+                        # preferred direction with no flow), ~45 deg mean acute angle; the
+                        # relaxation start point theta(0) for theta(t)=theta* +
+                        # (theta_stat-theta*) exp(-t/tau_orient)
+THETA_FLOW_DEG = 0.0    # orientation target theta* = 0 deg (PARALLEL / perfect flow
+                        # alignment). Re-calibrated: parallel is the optimal plateau and
+                        # 20 deg is the transient reached at t=6 h (was 20 deg, an
+                        # asymptote). See tau_orient (tau = 6/ln(45/20) ~ 7.4 h).
 THETA_STAT_STD_DEG = 25.0  # Source: imaging — orientation spread, static (49 +/- 25 deg)
 THETA_FLOW_STD_DEG = 14.0  # Source: imaging — orientation spread, flow (20 +/- 14 deg)
 RHO_SEN = 2.0           # senescent aspect ratio (no flow response)
@@ -668,7 +672,11 @@ class RecedingHorizonMPC:
         self.alpha_gamma = config.alpha_gamma
         self.tau_opt = config.tau_opt
         self.tau_act = config.tau_act
-        self.tau_adapt = config.tau_adapt_hours
+        self.tau_adapt = config.tau_adapt_hours   # shared: aspect ratio (rho) and area
+        # Dedicated orientation time constant: theta relaxes from theta_stat=45 deg toward
+        # the parallel target theta*=0 deg, calibrated so theta(6 h)=20 deg matches the
+        # reference imaging:  20 = 45*exp(-6/tau)  ->  tau = 6/ln(45/20) ~ 7.4 h.
+        self.tau_orient = getattr(config, 'tau_orient_hours', 7.4)
         self.theta_stat = np.radians(THETA_STAT_DEG)
         self.theta_flow = np.radians(THETA_FLOW_DEG)
 
@@ -715,10 +723,10 @@ class RecedingHorizonMPC:
         rho_t = self.rho_target(tau)
         rho_h_new = rho_t - (rho_t - rho_h) * np.exp(-dt / self.tau_adapt)
 
-        # Orientation relaxes on the circle (eq:orientation).
+        # Orientation relaxes on the circle (eq:orientation) with its own time constant.
         th_t = self.theta_target(tau)
         diff = ((th_t - theta_h) + np.pi) % (2 * np.pi) - np.pi
-        theta_h_new = theta_h + diff * (1.0 - np.exp(-dt / self.tau_adapt))
+        theta_h_new = theta_h + diff * (1.0 - np.exp(-dt / self.tau_orient))
 
         return {'pop': pop_new, 'rho_h': rho_h_new, 'theta_h': theta_h_new}
 
@@ -1162,7 +1170,8 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
             for cid, c in cells.items():
                 rho0c, th0c, tgt_rho, tgt_theta = start[cid]
                 c.actual_aspect_ratio = temporal.relax_step(rho0c, tgt_rho, th)
-                c.actual_orientation = temporal.orientation_step(th0c, tgt_theta, th)
+                c.actual_orientation = temporal.orientation_step(th0c, tgt_theta, th,
+                                                                 mpc.tau_orient)
             simulator.grid._update_voronoi_tessellation(preserve_temporal_dynamics=True)
             path = os.path.join(frames_dir, f"mpc_k{k:02d}_t{m:02d}.pdf")
             arr = _render_frame(simulator.grid, tau_k, t_abs, phi_s, path)
@@ -1173,7 +1182,8 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
         for cid, c in cells.items():
             rho0c, th0c, tgt_rho, tgt_theta = start[cid]
             c.actual_aspect_ratio = temporal.relax_step(rho0c, tgt_rho, mpc.dt_h)
-            c.actual_orientation = temporal.orientation_step(th0c, tgt_theta, mpc.dt_h)
+            c.actual_orientation = temporal.orientation_step(th0c, tgt_theta, mpc.dt_h,
+                                                             mpc.tau_orient)
             c.target_aspect_ratio = tgt_rho
             c.target_orientation = tgt_theta
 

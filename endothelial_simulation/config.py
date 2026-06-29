@@ -101,8 +101,12 @@ class SimulationConfig:
         # Spatial / temporal morphological targets
         self.tau_act = 0.5            # Source: Table 1, main.tex — tau_act = 0.5 Pa
         self.rho_star = 2.3           # Source: Table 1, main.tex — rho* = 2.3 (-)
-        self.theta_star = 20.0        # Source: Table 1, main.tex — theta* = 20 degrees
-        self.tau_adapt_hours = 9.0    # Source: Table 1, main.tex — tau_adapt = 6-12 h (nominal midpoint)
+        self.theta_star = 0.0         # orientation target theta* = 0 deg (parallel / perfect alignment); 20 deg is now the t=6 h transient
+        self.tau_adapt_hours = 9.0    # Source: Table 1, main.tex — tau_adapt = 6-12 h (nominal midpoint) — aspect ratio / area
+        # Orientation channel only: theta relaxes from theta_stat=45 deg toward theta*=0 deg,
+        # calibrated so theta(6 h)=20 deg matches the reference imaging (Chala/Nafsika):
+        #   20 = 45*exp(-6/tau)  ->  tau = 6/ln(45/20) ~ 7.4 h
+        self.tau_orient_hours = 7.4   # orientation adaptation time constant (h)
         self.target_area_healthy_um2 = 2354.0   # Source: Table 1, main.tex — A_E* = 2354 um^2
         # Population / senescence kinetics (eq:gamma_quad, eq:density)
         self.gamma_min = 0.00278      # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
