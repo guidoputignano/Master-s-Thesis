@@ -618,6 +618,15 @@ Examples:
     except Exception as e:
         print(f"⚠️  Could not save results: {e}")
 
+    # === FINAL QUANTIFICATION: MONOLAYER KPIs (first vs last timestep) ===
+    try:
+        from endothelial_simulation.monolayer_kpis import summarize_simulation
+        print("\n📐 Monolayer KPIs (first vs last timestep):")
+        kpi_path = os.path.join(config.plot_directory, f"monolayer_kpis_{timestamp}.png")
+        summarize_simulation(simulator, figure_path=kpi_path)
+    except Exception as e:
+        print(f"⚠️  Could not compute monolayer KPIs: {e}")
+
     # === CREATE VISUALIZATIONS ===
     try:
         print("\n📊 Generating visualizations...")
