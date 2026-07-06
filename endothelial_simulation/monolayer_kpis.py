@@ -367,8 +367,9 @@ def _self_test():
     thetaf = rng.normal(0.0, np.radians(8.0), size=n)
     arf = rng.normal(3.2, 0.4, size=n)
     senf = rng.random(n) < 0.20
-    # Introduce a small modelled gap so gap fraction is visibly non-zero.
-    areaf = np.full(n, 0.97 * domain_area / n)
+    # The tessellation is space-filling (holes disabled by default), so the
+    # cells tile the whole domain -> coverage ~1, gap ~0, just like a real run.
+    areaf = np.full(n, domain_area / n)
 
     m0 = compute_metrics(theta0, ar0, sen0, area0, domain_area)
     m1 = compute_metrics(thetaf, arf, senf, areaf, domain_area)
