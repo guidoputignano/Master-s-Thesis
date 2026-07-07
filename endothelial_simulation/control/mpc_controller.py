@@ -1,6 +1,4 @@
-import numpy as np
-from typing import Dict, Tuple, Optional
-
+import random
 import numpy as np
 from typing import Dict, Tuple, Optional, List
 from scipy.optimize import minimize
@@ -9,12 +7,24 @@ from ..models.temporal_dynamics import TemporalDynamicsModel
 from ..models.population_dynamics import PopulationDynamicsModel
 
 
-
-warnings.filterwarnings('ignore')
+# NOTE: the previous module-level `warnings.filterwarnings('ignore')` was removed
+# deliberately. It suppressed *all* warnings process-wide (both entry points
+# import this module), which masked numerical warnings (numpy overflow/invalid,
+# scipy convergence) and the DeprecationWarnings this module now raises for the
+# legacy path. Surfacing those is the point of the reliability pass; if a
+# specific benign warning becomes noisy, silence that category narrowly instead.
 
 
 class EndothelialMPCController:
     """
+    DEPRECATED (legacy path B): NOT used by run_mpc_simulation / the reported
+    model. This is the legacy event-driven MPC controller reached only from
+    `main.py`'s local run_mpc_simulation (i.e. `python -m endothelial_simulation.main`).
+    It relies on the deprecated per-cell response model (calculate_A_max /
+    calculate_tau via predict_future_state). The manuscript results are produced
+    by `RecedingHorizonMPC` + `run_mpc_simulation` below. Retained (with a
+    DeprecationWarning) so the CLI keeps working; do not build new work on it.
+
     Enhanced MPC Controller with soft constraints and predictive capabilities.
 
     Features:
@@ -27,6 +37,12 @@ class EndothelialMPCController:
     """
 
     def __init__(self, simulator, config):
+        warnings.warn(
+            "EndothelialMPCController is DEPRECATED: not used by "
+            "run_mpc_simulation / the reported model (path A). It is the legacy "
+            "MPC controller (path B), retained only for the `main.py` CLI. Use "
+            "RecedingHorizonMPC / run_mpc_simulation for the reported model.",
+            DeprecationWarning, stacklevel=2)
         self.simulator = simulator
         self.config = config
 
@@ -634,8 +650,13 @@ def _gated(y_stat, y_flow, tau, tau_act):
 
 class RecedingHorizonMPC:
     """
-    Receding-horizon MPC controller (main.tex, eq:ocp).
+    Receding-horizon MPC controller for endothelial mechanoadaptation
+    (main.tex, sec. 2.4, eq:ocp). This class + ``run_mpc_simulation`` below are
+    THE reported model (path A); the docstring is written to serve directly as
+    the basis for the methods section.
 
+    Optimal control problem
+    -----------------------
     Decision variable:  tau(k) in [0, 2] Pa on a 1 h control grid.
     Prediction horizon: N_p steps;  control horizon: N_c steps (blocked input).
     Cost (per spec):
@@ -644,6 +665,71 @@ class RecedingHorizonMPC:
           + w_varphi * sum_k (varphi_bar(k) - 0.0)^2
           + w_u      * sum_k (tau(k) - tau(k-1))^2
     Hard constraints:  phi_sen(k) <= 0.30 ;  0 <= tau(k) <= 2.
+    Solved by constrained SLSQP; only the first move is applied (receding
+    horizon).
+
+    Prediction state
+    ----------------
+    x = {pop, rho_h, theta_h}, where
+      * pop = [E_0, ..., E_N, S_tel, S_str] are the reduced population
+        compartments (healthy cells by division stage + telomere- and
+        stress-senescent counts);
+      * rho_h is the healthy-population mean aspect ratio;
+      * theta_h is the healthy-population mean orientation (radians).
+
+    Morphological targets — gated static -> flow interpolation
+    ----------------------------------------------------------
+    Targets are NOT free set-points: each is the flow-driven interpolation of a
+    measured static baseline toward a measured flow plateau, opened by the
+    monotone activation gate s(tau) (eq:target):
+
+        s(tau) = 0                                for tau <= tau_act
+        s(tau) = 1 - exp(-(tau - tau_act)/tau_act) for tau >  tau_act
+        y*(tau) = y_stat + (y_flow - y_stat) * s(tau)
+
+    with tau_act = config.tau_act (Table 1; 0.5 Pa). Applied to:
+      * aspect ratio:  rho_stat = 1.9  ->  rho_flow = 2.3  (rho_target)
+      * orientation:   theta_stat = 45 deg -> theta_flow = 0 deg (parallel /
+        perfect flow alignment) (theta_target)
+    Below tau_act the monolayer stays isotropic (s = 0, targets = static).
+    Per-cell heterogeneity is added as target = mean + z * std(tau), z fixed per
+    cell, with the experimental spread itself gated static -> flow.
+
+    Two FIXED adaptation time constants (this is the reported dynamics)
+    ------------------------------------------------------------------
+    Between control instants the healthy morphology relaxes toward its target by
+    the closed-form first-order step response (eq:stepsolution)
+        y(t+dt) = y* - (y* - y0) * exp(-dt / tau),
+    with two DISTINCT, INPUT-INDEPENDENT constants (there is no tau = f(A_max)
+    scaling here — that is the deprecated legacy model):
+      * tau_orient = config.tau_orient_hours = 7.4 h  for ORIENTATION.
+        theta relaxes on the circle using the shortest-arc wrap
+        <psi> = ((psi + pi) mod 2pi) - pi. Calibrated so theta(6 h) = 20 deg
+        matches the reference imaging:  20 = 45*exp(-6/tau) => tau = 6/ln(45/20)
+        ~ 7.4 h.
+      * tau_adapt = config.tau_adapt_hours ~ 9 h  for ASPECT RATIO and AREA
+        (Table 1 nominal midpoint of 6-12 h).
+
+    Senescence — reduced population ODEs (NOT a per-cell stress clock)
+    -----------------------------------------------------------------
+    The senescent fraction is governed by the reduced population ODE system
+    ``population_reduced_rhs`` (eq:reduced), integrated over each control
+    interval with scipy.integrate.solve_ivp (RK45):
+        dE_i/dt   = 2 r g(N_E) E_{i-1} - r g(N_E) E_i - gamma_tau(tau)(1+xi i) E_i
+        dS_tel/dt = r g(N_E) E_N
+        dS_str/dt = sum_i gamma_tau(tau)(1+xi i) E_i
+        g(N_E)    = 1/(1 + N_E/K)                            (contact inhibition)
+        gamma_tau = gamma_min + alpha_gamma (tau - tau_opt)^2 (U-shaped induction)
+    phi_sen = (S_tel + S_str) / (N_E + S_tel + S_str). The per-cell
+    ``stress_exposure_time`` clock of the legacy model plays NO role here; in the
+    closed loop the ODE compartment counts are mapped back onto individual cells
+    by ``_reconcile_senescence``.
+
+    Regulated outputs (population means; see ``outputs``)
+    ----------------------------------------------------
+    phi_sen; rho_bar (senescent cells carry the non-adapting RHO_SEN = 2.0);
+    varphi_bar = mean acute flow-alignment angle (senescent cells randomly
+    oriented at PHI_SEN_RANDOM = pi/4).
     """
 
     def __init__(self, config,
@@ -707,7 +793,20 @@ class RecedingHorizonMPC:
 
     # ---- one-step prediction (closed-form morphology + RK45 population) ------
     def predict_step(self, state, tau, dt=None):
-        """Advance the reduced prediction state by one control interval at tau."""
+        """
+        Advance the reduced prediction state by one control interval at ``tau``.
+
+        Three coupled updates, each per the reported model:
+          1. Population compartments (senescence): integrate ``population_reduced_rhs``
+             (eq:reduced) over [0, dt] with solve_ivp/RK45.
+          2. Aspect ratio rho_h: closed-form relaxation toward rho_target(tau)
+             with the FIXED tau_adapt (~9 h).
+          3. Orientation theta_h: closed-form relaxation on the circle
+             (shortest-arc wrap) toward theta_target(tau) with the FIXED
+             tau_orient (7.4 h).
+        No input-dependent time-constant scaling is used (that is the deprecated
+        legacy model).
+        """
         dt = self.dt_h if dt is None else dt
         pop, rho_h, theta_h = state['pop'], state['rho_h'], state['theta_h']
 
@@ -1102,6 +1201,16 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
     mpc = RecedingHorizonMPC(config)
     temporal = simulator.models['temporal']
 
+    # === REPRODUCIBILITY ===
+    # Reseed both RNGs from the master seed (config.random_seed, default 42)
+    # before drawing the per-cell heterogeneity deviates, so those standardized
+    # normal deviates (z_theta, z_rho) are reproducible independently of how many
+    # random draws initialisation consumed. Seed is recorded in the return value.
+    seed = int(getattr(config, 'random_seed', 42))  # dimensionless
+    random.seed(seed)
+    np.random.seed(seed)
+    print(f"🎲 MPC heterogeneity RNG seed: {seed}")
+
     # Per-cell heterogeneity: fix a standardised normal deviate per cell so each
     # cell tracks its own target = mean + z * std (spread tightens under flow).
     for c in simulator.grid.cells.values():
@@ -1223,4 +1332,5 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
     print(f"📈 Summary figures written to {output_dir}")
 
     return {'log': log, 'ts': ts, 'frames': [f['path'] for f in frames],
-            'animation': anim_path, 'dashboard': dash_path, 'output_dir': output_dir}
+            'animation': anim_path, 'dashboard': dash_path, 'output_dir': output_dir,
+            'seed': seed}   # master RNG seed used for this run (reproducibility)

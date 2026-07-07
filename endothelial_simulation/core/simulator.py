@@ -6,6 +6,7 @@ import numpy as np
 import time
 import os
 import random
+import warnings
 from typing import Dict, List, Optional
 import matplotlib.pyplot as plt
 
@@ -25,11 +26,14 @@ class Simulator:
 
     def __init__(self, config):
         """Initialize the simulator with configuration parameters."""
-        # Set random seed for reproducibility
-        import time, random, numpy as np
-        seed = int(time.time_ns() % (2 ** 32))
-        random.seed(seed)
-        np.random.seed(seed)
+        # === REPRODUCIBILITY ===
+        # Seed both RNGs from the deterministic master seed (config.random_seed,
+        # default 42) rather than the wall clock, so every run is reproducible.
+        # `random` and `numpy as np` are already imported at module top.
+        self.random_seed = int(getattr(config, 'random_seed', 42))  # dimensionless
+        random.seed(self.random_seed)
+        np.random.seed(self.random_seed)
+        print(f"🎲 RNG seed (master): {self.random_seed}")
 
         self.config = config
 
@@ -1476,66 +1480,76 @@ class Simulator:
 
     def get_safe_final_statistics(self):
         """
-        Get final statistics safely, avoiding memory/overflow issues.
+        Get final statistics, guarding against numerical failures.
+
+        Reproducibility/reporting contract: a numerical failure is reported as an
+        explicit NaN accompanied by a warning — NEVER as a masked value of 0
+        (which is indistinguishable from a legitimate zero result). Exception
+        handling is narrowed to the numerical failure modes; genuinely structural
+        errors (e.g. a missing grid) are allowed to surface to the caller rather
+        than being swallowed into an all-zeros dictionary.
 
         Returns:
-            Dictionary with safe statistics
+            Dictionary of final statistics. Numeric fields are NaN if their
+            computation failed (with a warning logged); count fields are 0 only
+            when the count is genuinely zero.
         """
+        stats = {}
+
+        # Basic cell counts (pure iteration, not a numerical computation).
+        total_cells = len(self.grid.cells)
+        stats['total_cells'] = total_cells
+
+        senescent_count = 0
+        healthy_count = 0
+        for cell in self.grid.cells.values():
+            if getattr(cell, 'is_senescent', False):
+                senescent_count += 1
+            else:
+                healthy_count += 1
+        stats['healthy_cells'] = healthy_count
+        stats['senescent_cells'] = senescent_count
+
+        # Biological energy (dimensionless model energy). Report the true finite
+        # value; on a numerical failure or a non-finite result, report NaN + a
+        # warning — not 0.0, and with no silent 1e6 cap that would hide overflow.
         try:
-            stats = {}
+            biological_energy = float(self.grid.calculate_biological_energy())
+        except (ArithmeticError, ValueError, OverflowError) as e:
+            warnings.warn(
+                f"biological_energy computation failed numerically ({e}); "
+                "reporting NaN, not 0.", RuntimeWarning)
+            biological_energy = float('nan')
+        else:
+            if not np.isfinite(biological_energy):
+                warnings.warn(
+                    f"biological_energy is non-finite ({biological_energy}); "
+                    "reporting NaN, not 0.", RuntimeWarning)
+                biological_energy = float('nan')
+        stats['biological_energy'] = biological_energy
 
-            # Basic cell counts (safe)
-            total_cells = len(self.grid.cells)
-            stats['total_cells'] = total_cells
+        # Packing efficiency = cells / grid area (dimensionless, clipped to 1).
+        try:
+            grid_area = self.grid.width * self.grid.height
+            if grid_area <= 0:
+                warnings.warn(
+                    f"grid area is non-positive ({grid_area}); packing efficiency "
+                    "is undefined -> NaN, not 0.", RuntimeWarning)
+                packing_efficiency = float('nan')
+            else:
+                packing_efficiency = min(total_cells / grid_area, 1.0)
+        except (ArithmeticError, ValueError, OverflowError) as e:
+            warnings.warn(
+                f"packing_efficiency computation failed numerically ({e}); "
+                "reporting NaN, not 0.", RuntimeWarning)
+            packing_efficiency = float('nan')
+        stats['packing_efficiency'] = packing_efficiency
 
-            # Count senescent cells safely
-            senescent_count = 0
-            healthy_count = 0
+        # Event-driven bookkeeping (list lengths — genuine counts, never masked).
+        stats['reconfigurations_count'] = len(getattr(self, 'configuration_history', []))
+        stats['events_count'] = len(getattr(self, 'event_history', []))
 
-            for cell in self.grid.cells.values():
-                if getattr(cell, 'is_senescent', False):
-                    senescent_count += 1
-                else:
-                    healthy_count += 1
-
-            stats['healthy_cells'] = healthy_count
-            stats['senescent_cells'] = senescent_count
-
-            # Safe energy calculation
-            try:
-                biological_energy = self.grid.calculate_biological_energy()
-                # Cap energy to prevent overflow
-                biological_energy = min(biological_energy, 1e6)
-                stats['biological_energy'] = biological_energy
-            except Exception as e:
-                stats['biological_energy'] = 0.0
-                print(f"Could not calculate biological energy: {e}")
-
-            # Safe packing efficiency
-            try:
-                grid_area = self.grid.width * self.grid.height
-                stats['packing_efficiency'] = min(total_cells / grid_area, 1.0) if grid_area > 0 else 0.0
-            except Exception as e:
-                stats['packing_efficiency'] = 0.0
-                print(f"Could not calculate packing efficiency: {e}")
-
-            # Event-driven specific stats (safe)
-            stats['reconfigurations_count'] = len(getattr(self, 'configuration_history', []))
-            stats['events_count'] = len(getattr(self, 'event_history', []))
-
-            return stats
-
-        except Exception as e:
-            print(f"Error getting safe statistics: {e}")
-            return {
-                'total_cells': len(self.grid.cells) if hasattr(self, 'grid') else 0,
-                'healthy_cells': 0,
-                'senescent_cells': 0,
-                'biological_energy': 0.0,
-                'packing_efficiency': 0.0,
-                'reconfigurations_count': 0,
-                'events_count': 0
-            }
+        return stats
 
     def get_best_config_parameters(self, save_excel=False, excel_path=None):
         """

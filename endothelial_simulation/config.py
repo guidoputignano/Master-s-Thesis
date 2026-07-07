@@ -9,6 +9,15 @@ class SimulationConfig:
     """Clean, simplified configuration for event-driven system."""
 
     def __init__(self):
+        # === REPRODUCIBILITY ===
+        # Master RNG seed for the whole simulation (dimensionless integer).
+        # Seeds both the stdlib `random` module and numpy's global RNG — in
+        # Simulator.__init__ and again before the MPC per-cell heterogeneity
+        # draws — so every stochastic draw (cell layout, initial senescence
+        # assignment, per-cell z-deviates) is reproducible across runs. Replaces
+        # the previous wall-clock (time.time_ns()) seeding.
+        self.random_seed = 42
+
         # === CORE SIMULATION PARAMETERS ===
         self.simulation_duration = 360  # minutes (6 hours)
         self.time_step = 1.0  # minutes
@@ -123,29 +132,29 @@ class SimulationConfig:
         # Calculated automatically to match max_divisions
         self.telomere_loss_per_division = self.initial_telomere_mean / self.max_divisions
 
-        # These are based on experimental data - adjust values as needed
-        self.known_pressures = [0.0, 1.4]  # Pressure values in Pa
+        # === LEGACY TEMPORAL-RESPONSE PARAMETERS (path B only) ===
+        # DEPRECATED: consumed only by the legacy per-cell response model
+        # (TemporalDynamicsModel.calculate_A_max / calculate_tau /
+        # update_cell_responses), which is NOT used by run_mpc_simulation / the
+        # reported model. The reported dynamics use the gated static->flow targets
+        # and the fixed adaptation constants (tau_orient_hours = 7.4 h,
+        # tau_adapt_hours = 9.0 h) defined above.
+        #
+        # These five fields were previously assigned twice in __init__; the
+        # values kept here are the ones that were already in effect (the second,
+        # winning assignment: tau_base = 60.0, lambda_scale = 0.3), so removing
+        # the shadowed duplicates changes no simulation output. Retained in this
+        # config (rather than relocated to a separate module) because
+        # TemporalDynamicsModel.__init__ reads them at construction and the legacy
+        # CLI must keep working.
+        self.known_pressures = [0.0, 1.4]   # Pa — pressures with a measured A_max (legacy)
         self.known_A_max = {
-            0.0: 1.0,  # A_max at 0 Pa (baseline)
-            1.4: 2.5  # A_max at 1.4 Pa (example value - adjust based on your data)
+            0.0: 1.0,   # A_max at 0 Pa (baseline) — legacy per-cell response
+            1.4: 2.5    # A_max at 1.4 Pa — legacy per-cell response
         }
-
-        # Initial response value
-        self.initial_response = 1.0
-
-        # Time constant parameters
-        self.tau_base = 1.0  # Base time constant (minutes)
-        self.lambda_scale = 0.5  # Lambda scaling parameter
-
-        # === TEMPORAL DYNAMICS PARAMETERS ===
-        self.known_pressures = [0.0, 1.4]
-        self.known_A_max = {
-            0.0: 1.0,  # A_max at 0 Pa (baseline)
-            1.4: 2.5  # A_max at 1.4 Pa
-        }
-        self.initial_response = 1.0
-        self.tau_base = 60.0  # Base time constant (minutes)
-        self.lambda_scale = 0.3  # Lambda scaling parameter
+        self.initial_response = 1.0   # legacy per-cell response initial value
+        self.tau_base = 60.0          # minutes — legacy response time-constant base (value in effect)
+        self.lambda_scale = 0.3       # legacy response tau power-law exponent (value in effect)
 
         # === POPULATION DYNAMICS PARAMETERS ===
         self.proliferation_rate = 0.025  # Source: Table 1, main.tex — r = 0.02-0.03 h^-1 (nominal 0.025)
@@ -258,6 +267,7 @@ class SimulationConfig:
         """Get configuration summary."""
         return {
             'mode': 'event-driven',
+            'seed': self.random_seed,   # master RNG seed (reproducibility)
             'components': [
                 name for name, enabled in [
                     ('temporal', self.enable_temporal_dynamics),
@@ -286,6 +296,7 @@ class SimulationConfig:
    Initial cells: {summary['cells']}
    Grid size: {self.grid_size[0]}×{self.grid_size[1]}
    Time step: {self.time_step} min
+   RNG seed: {summary['seed']}
 
 🔄 Event-Driven System:
    Pressure threshold: {self.pressure_change_threshold} Pa

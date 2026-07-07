@@ -3,8 +3,36 @@ Temporal dynamics model for endothelial cell adaptation to mechanical stimuli.
 Enhanced with scaled time constants for different biological properties.
 """
 import numpy as np
+import warnings
 from scipy.integrate import odeint
 from scipy.optimize import minimize
+
+
+# --- Legacy (path B) deprecation plumbing -------------------------------------
+# DEPRECATED symbols: the per-cell "response" model (calculate_A_max,
+# calculate_tau with tau = tau_base * A_max**lambda_scale, update_cell_responses,
+# and the get_*tau_and_amax wrappers built on them) is NOT used by
+# run_mpc_simulation / RecedingHorizonMPC (the reported model, path A). The
+# reported dynamics use relax_step / orientation_step + the reduced population
+# ODEs instead. These functions survive only for the legacy CLI simulation modes
+# (Simulator.step) and the sensitivity scripts, so they are kept importable and
+# functional but emit a one-shot DeprecationWarning on entry. This leaves a
+# single, unambiguous representation of the reported model.
+_LEGACY_WARNED = set()
+
+
+def _warn_legacy_once(name, detail=""):
+    """Emit a one-shot DeprecationWarning for a legacy (path-B) symbol.
+
+    One-shot (guarded by a module-level set) so per-step / per-cell callers such
+    as Simulator.step do not flood the log.
+    """
+    if name not in _LEGACY_WARNED:
+        _LEGACY_WARNED.add(name)
+        warnings.warn(
+            f"{name} is DEPRECATED: not used by run_mpc_simulation / the reported "
+            f"model (path A); retained only for the legacy path (path B). {detail}",
+            DeprecationWarning, stacklevel=2)
 
 
 class TemporalDynamicsModel:
@@ -137,6 +165,10 @@ class TemporalDynamicsModel:
 
     def calculate_A_max(self, P):
         """
+        DEPRECATED (legacy path B): not used by run_mpc_simulation / the reported
+        model. Retained only for the legacy CLI simulation modes and sensitivity
+        scripts.
+
         Calculate the maximum response (steady-state value) for a given pressure.
 
         Uses a hybrid approach with direct lookup for known pressures and linear
@@ -148,6 +180,8 @@ class TemporalDynamicsModel:
         Returns:
             Maximum attainable response at the given pressure
         """
+        _warn_legacy_once("TemporalDynamicsModel.calculate_A_max",
+                          "The reported model uses gated static->flow targets, not A_max.")
         # For known pressure values, use the original A_max from the map
         if P in self.A_max_map:
             return self.A_max_map[P]
@@ -158,6 +192,11 @@ class TemporalDynamicsModel:
 
     def calculate_tau(self, A_max):
         """
+        DEPRECATED (legacy path B): not used by run_mpc_simulation / the reported
+        model. The reported dynamics use the two fixed adaptation time constants
+        (tau_orient = 7.4 h, tau_adapt ~ 9 h), not tau = tau_base * A_max**lambda_scale.
+        Retained only for the legacy CLI simulation modes and sensitivity scripts.
+
         Calculate the time constant based on A_max.
 
         Time constant scales with A_max following a power law relationship.
@@ -168,6 +207,8 @@ class TemporalDynamicsModel:
         Returns:
             Time constant (tau) value
         """
+        _warn_legacy_once("TemporalDynamicsModel.calculate_tau",
+                          "tau = tau_base * A_max**lambda_scale (legacy power law).")
         # Reference value is 1.0
         return self.tau_base * (A_max ** self.lambda_scale)
 
@@ -381,6 +422,11 @@ class TemporalDynamicsModel:
 
     def update_cell_responses(self, cells, P, dt):
         """
+        DEPRECATED (legacy path B): not used by run_mpc_simulation / the reported
+        model. Only Simulator.step() (the non-MPC CLI simulation modes) calls this
+        per-cell scalar-response update; the reported model tracks morphology
+        (aspect ratio / orientation) + the population ODEs instead.
+
         Update the response values of all cells based on the current pressure.
 
         Parameters:
@@ -391,6 +437,8 @@ class TemporalDynamicsModel:
         Returns:
             Dictionary mapping cell_id to new response value
         """
+        _warn_legacy_once("TemporalDynamicsModel.update_cell_responses",
+                          "The reported model does not use a per-cell scalar response.")
         updated_responses = {}
 
         for cell_id, cell in cells.items():
