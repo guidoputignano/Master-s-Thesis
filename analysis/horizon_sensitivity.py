@@ -725,7 +725,7 @@ def main(argv=None):
 
     if args.verify:
         print('\nReproducibility check: re-running the study with the same seed ...')
-        _, aggregates2, _ = run_study(
+        _, aggregates2 = run_study(
             config, np_grid=np_grid, nc_nominal=NC_NOMINAL, np_nominal=NP_NOMINAL,
             n_rep=n_rep, num_steps=num_steps, base_seed=base_seed)
         sig1 = _deterministic_signature(aggregates)
