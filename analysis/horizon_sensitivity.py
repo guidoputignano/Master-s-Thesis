@@ -569,7 +569,7 @@ def figure_nc_sweep(aggregates, meta, out_noext):
     for i in range(len(nc_vals)):
         for j in range(len(np_vals)):
             if not np.isnan(grid[i, j]):
-                ax.text(j, i, f"{grid[i, j]:.1f}", ha='center', va='center',
+                ax.text(j, i, f"{grid[i, j]:.2f}", ha='center', va='center',
                         color='white', fontsize=7)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
