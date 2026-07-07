@@ -1,6 +1,13 @@
 """
 Event-driven simulator that uses configuration transitions instead of continuous forces.
 Integrates EventDetector, ConfigurationManager, and TransitionController.
+
+DEPRECATED / DEAD CODE: the ``EventDrivenSimulator`` class below is a stale,
+near-duplicate copy of ``core/simulator.py:Simulator``. The call-graph audit
+(docs/code_audit.md) confirms it is never imported or instantiated anywhere in
+the package, the CLI, or the analysis scripts, and it is NOT used by
+run_mpc_simulation / the reported model. It is retained only for reference; do
+not build new work on it (use ``core.simulator.Simulator``).
 """
 import numpy as np
 import time
@@ -27,12 +34,15 @@ class EventDrivenSimulator:
     
     def __init__(self, config):
         """Initialize the event-driven simulator."""
-        # Set random seed for reproducibility
-        import time, random, numpy as np
-        seed = int(time.time_ns() % (2 ** 32))
-        random.seed(seed)
-        np.random.seed(seed)
-        
+        # === REPRODUCIBILITY ===
+        # Seed both RNGs from the deterministic master seed (config.random_seed,
+        # default 42) rather than the wall clock. (Legacy class — see the
+        # module-level DEPRECATED notice; retained only for reference.)
+        import random
+        self.random_seed = int(getattr(config, 'random_seed', 42))  # dimensionless
+        random.seed(self.random_seed)
+        np.random.seed(self.random_seed)
+
         self.config = config
         
         # Create grid (remove force-based optimization)
@@ -463,7 +473,7 @@ class EventDrivenSimulator:
         
         for cell_id, cell in self.grid.cells.items():
             target_area = spatial_model.calculate_target_area(
-                pressure, cell.is_senescent, cell.senescence_cause
+                current_pressure, cell.is_senescent, cell.senescence_cause  # was undefined `pressure`; the local is current_pressure
             )
             target_aspect_ratio = spatial_model.calculate_target_aspect_ratio(
                 current_pressure, cell.is_senescent

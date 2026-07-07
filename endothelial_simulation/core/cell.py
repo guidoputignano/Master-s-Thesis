@@ -3,7 +3,30 @@ Core module for the Cell class that represents a single endothelial cell with te
 Optimized version for better performance.
 """
 import numpy as np
+import warnings
 from endothelial_simulation import config
+
+
+# --- Legacy (path B) deprecation plumbing -------------------------------------
+# The per-cell `stress_exposure_time` clock and the deterministic stress-based
+# senescence it drives are NOT used by run_mpc_simulation / the reported model
+# (path A), where senescence is governed by the reduced population ODEs and
+# reconciled onto cells by _reconcile_senescence. The clock is exercised only by
+# Simulator.step() (the legacy / non-MPC CLI simulation modes). The methods are
+# kept functional but emit a one-shot DeprecationWarning on entry.
+_LEGACY_WARNED = set()
+
+
+def _warn_legacy_once(name, detail=""):
+    """One-shot DeprecationWarning for a legacy (path-B) symbol (guarded so
+    per-step callers such as Simulator.step do not flood the log)."""
+    if name not in _LEGACY_WARNED:
+        _LEGACY_WARNED.add(name)
+        warnings.warn(
+            f"{name} is DEPRECATED: not used by run_mpc_simulation / the reported "
+            f"model (path A); the reported model drives senescence via the reduced "
+            f"population ODEs. Retained only for the legacy path (path B). {detail}",
+            DeprecationWarning, stacklevel=2)
 
 
 class Cell:
@@ -96,9 +119,13 @@ class Cell:
         variability = np.random.normal(1.0, 0.2)
         self.cellular_resistance = base_resistance * max(0.5, variability)
 
-        # Stress accumulation tracking
+        # Stress accumulation tracking.
+        # DEPRECATED (legacy path B): the `stress_exposure_time` clock below is
+        # initialised for every cell but is only advanced/read by Simulator.step()
+        # (the non-MPC CLI modes). On the reported path A it stays 0.0 and is
+        # never consulted — senescence there comes from the population ODEs.
         self.accumulated_stress = 0.0
-        self.stress_exposure_time = 0.0
+        self.stress_exposure_time = 0.0  # hours of cumulative stress exposure (legacy clock)
 
     @property
     def is_senescent(self):
@@ -178,6 +205,10 @@ class Cell:
 
     def update_stress_and_check_senescence(self, dt_hours, config, spatial_model=None, pressure=None):
         """
+        DEPRECATED (legacy path B): the per-cell stress clock is not used by the
+        reported model (path A drives senescence via the reduced population ODEs).
+        Retained for the legacy / non-MPC CLI simulation modes.
+
         Update stress exposure and check for deterministic senescence.
         Call this method each time step.
 
@@ -190,6 +221,7 @@ class Cell:
         Returns:
             bool: True if senescence was triggered
         """
+        _warn_legacy_once("Cell.update_stress_and_check_senescence (stress_exposure_time clock)")
         if self.is_senescent:
             return False
 
@@ -636,6 +668,12 @@ class Cell:
 
     def update_and_check_all_senescence(self, dt_hours, config, spatial_model=None, pressure=None):
         """
+        DEPRECATED (legacy path B): drives the per-cell stress_exposure_time clock
+        and deterministic stress senescence, which the reported model (path A)
+        does not use — there senescence is governed by the reduced population ODEs
+        and reconciled onto cells by _reconcile_senescence. Reached only from
+        Simulator.step() (the non-MPC CLI simulation modes).
+
         Update stress exposure and check all senescence mechanisms.
 
         Args:
@@ -647,6 +685,7 @@ class Cell:
         Returns:
             bool: True if senescence was triggered
         """
+        _warn_legacy_once("Cell.update_and_check_all_senescence (stress_exposure_time clock)")
         if self.is_senescent:
             return False
 
@@ -774,7 +813,10 @@ class Cell:
             return ((0.00278 + tau * 0.00992) / (16.5*5))
 
     def update_stress_exposure(self, dt_hours):
-        """Update stress exposure time for any stress above 0 Pa."""
+        """DEPRECATED (legacy path B): advances the per-cell stress_exposure_time
+        clock, which the reported model does not use. Update stress exposure time
+        for any stress above 0 Pa."""
+        _warn_legacy_once("Cell.update_stress_exposure (stress_exposure_time clock)")
         if self.local_shear_stress > 0:
             self.stress_exposure_time += dt_hours
 

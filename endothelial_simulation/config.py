@@ -9,6 +9,15 @@ class SimulationConfig:
     """Clean, simplified configuration for event-driven system."""
 
     def __init__(self):
+        # === REPRODUCIBILITY ===
+        # Master RNG seed for the whole simulation (dimensionless integer).
+        # Seeds both the stdlib `random` module and numpy's global RNG — in
+        # Simulator.__init__ and again before the MPC per-cell heterogeneity
+        # draws — so every stochastic draw (cell layout, initial senescence
+        # assignment, per-cell z-deviates) is reproducible across runs. Replaces
+        # the previous wall-clock (time.time_ns()) seeding.
+        self.random_seed = 42
+
         # === CORE SIMULATION PARAMETERS ===
         self.simulation_duration = 360  # minutes (6 hours)
         self.time_step = 1.0  # minutes
@@ -102,11 +111,24 @@ class SimulationConfig:
         self.tau_act = 0.5            # Source: Table 1, main.tex — tau_act = 0.5 Pa
         self.rho_star = 2.3           # Source: Table 1, main.tex — rho* = 2.3 (-)
         self.theta_star = 0.0         # orientation target theta* = 0 deg (parallel / perfect alignment); 20 deg is now the t=6 h transient
-        self.tau_adapt_hours = 9.0    # Source: Table 1, main.tex — tau_adapt = 6-12 h (nominal midpoint) — aspect ratio / area
-        # Orientation channel only: theta relaxes from theta_stat=45 deg toward theta*=0 deg,
-        # calibrated so theta(6 h)=20 deg matches the reference imaging (Chala/Nafsika):
+        # ASPECT-RATIO adaptation time constant (hours). Set equal to
+        # tau_orient_hours (7.4 h): orientation and aspect ratio are driven by the
+        # same cytoskeletal remodelling, and only the orientation constant is
+        # calibrated against imaging (theta(6 h)=20 deg => 6/ln(45/20) ~ 7.4 h).
+        # There is no independent aspect-ratio timecourse to justify a distinct
+        # value, so a single, data-calibrated morphological constant is the
+        # parsimonious choice (was 9.0 h, the Table-1 6-12 h midpoint). NOTE: this
+        # constant governs ASPECT RATIO only — cell AREA is fixed by the Voronoi
+        # tessellation and is not relaxed with a temporal constant on the paper path.
+        self.tau_adapt_hours = 7.4    # hours — aspect-ratio adaptation; equals tau_orient_hours (one physical constant)
+        # Orientation adaptation time constant (hours): theta relaxes from
+        # theta_stat=45 deg toward theta*=0 deg, calibrated so theta(6 h)=20 deg
+        # matches the reference imaging (Chala/Nafsika):
         #   20 = 45*exp(-6/tau)  ->  tau = 6/ln(45/20) ~ 7.4 h
-        self.tau_orient_hours = 7.4   # orientation adaptation time constant (h)
+        # Kept as a SEPARATE field from tau_adapt_hours (both = 7.4 h, representing
+        # one physical constant) so the planned sensitivity study can still sweep
+        # orientation and aspect-ratio constants independently.
+        self.tau_orient_hours = 7.4   # hours — orientation adaptation time constant (see above)
         self.target_area_healthy_um2 = 2354.0   # Source: Table 1, main.tex — A_E* = 2354 um^2
         # Population / senescence kinetics (eq:gamma_quad, eq:density)
         self.gamma_min = 0.00278      # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
@@ -123,29 +145,29 @@ class SimulationConfig:
         # Calculated automatically to match max_divisions
         self.telomere_loss_per_division = self.initial_telomere_mean / self.max_divisions
 
-        # These are based on experimental data - adjust values as needed
-        self.known_pressures = [0.0, 1.4]  # Pressure values in Pa
+        # === LEGACY TEMPORAL-RESPONSE PARAMETERS (path B only) ===
+        # DEPRECATED: consumed only by the legacy per-cell response model
+        # (TemporalDynamicsModel.calculate_A_max / calculate_tau /
+        # update_cell_responses), which is NOT used by run_mpc_simulation / the
+        # reported model. The reported dynamics use the gated static->flow targets
+        # and the single fixed morphological adaptation constant defined above
+        # (tau_orient_hours = tau_adapt_hours = 7.4 h).
+        #
+        # These five fields were previously assigned twice in __init__; the
+        # values kept here are the ones that were already in effect (the second,
+        # winning assignment: tau_base = 60.0, lambda_scale = 0.3), so removing
+        # the shadowed duplicates changes no simulation output. Retained in this
+        # config (rather than relocated to a separate module) because
+        # TemporalDynamicsModel.__init__ reads them at construction and the legacy
+        # CLI must keep working.
+        self.known_pressures = [0.0, 1.4]   # Pa — pressures with a measured A_max (legacy)
         self.known_A_max = {
-            0.0: 1.0,  # A_max at 0 Pa (baseline)
-            1.4: 2.5  # A_max at 1.4 Pa (example value - adjust based on your data)
+            0.0: 1.0,   # A_max at 0 Pa (baseline) — legacy per-cell response
+            1.4: 2.5    # A_max at 1.4 Pa — legacy per-cell response
         }
-
-        # Initial response value
-        self.initial_response = 1.0
-
-        # Time constant parameters
-        self.tau_base = 1.0  # Base time constant (minutes)
-        self.lambda_scale = 0.5  # Lambda scaling parameter
-
-        # === TEMPORAL DYNAMICS PARAMETERS ===
-        self.known_pressures = [0.0, 1.4]
-        self.known_A_max = {
-            0.0: 1.0,  # A_max at 0 Pa (baseline)
-            1.4: 2.5  # A_max at 1.4 Pa
-        }
-        self.initial_response = 1.0
-        self.tau_base = 60.0  # Base time constant (minutes)
-        self.lambda_scale = 0.3  # Lambda scaling parameter
+        self.initial_response = 1.0   # legacy per-cell response initial value
+        self.tau_base = 60.0          # minutes — legacy response time-constant base (value in effect)
+        self.lambda_scale = 0.3       # legacy response tau power-law exponent (value in effect)
 
         # === POPULATION DYNAMICS PARAMETERS ===
         self.proliferation_rate = 0.025  # Source: Table 1, main.tex — r = 0.02-0.03 h^-1 (nominal 0.025)
@@ -258,6 +280,7 @@ class SimulationConfig:
         """Get configuration summary."""
         return {
             'mode': 'event-driven',
+            'seed': self.random_seed,   # master RNG seed (reproducibility)
             'components': [
                 name for name, enabled in [
                     ('temporal', self.enable_temporal_dynamics),
@@ -286,6 +309,7 @@ class SimulationConfig:
    Initial cells: {summary['cells']}
    Grid size: {self.grid_size[0]}×{self.grid_size[1]}
    Time step: {self.time_step} min
+   RNG seed: {summary['seed']}
 
 🔄 Event-Driven System:
    Pressure threshold: {self.pressure_change_threshold} Pa
