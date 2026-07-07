@@ -193,8 +193,8 @@ class TemporalDynamicsModel:
     def calculate_tau(self, A_max):
         """
         DEPRECATED (legacy path B): not used by run_mpc_simulation / the reported
-        model. The reported dynamics use the two fixed adaptation time constants
-        (tau_orient = 7.4 h, tau_adapt ~ 9 h), not tau = tau_base * A_max**lambda_scale.
+        model. The reported dynamics use a single fixed morphological adaptation
+        time constant (7.4 h; tau_orient = tau_adapt), not tau = tau_base * A_max**lambda_scale.
         Retained only for the legacy CLI simulation modes and sensitivity scripts.
 
         Calculate the time constant based on A_max.

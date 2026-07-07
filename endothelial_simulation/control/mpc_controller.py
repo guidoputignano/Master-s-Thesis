@@ -695,20 +695,29 @@ class RecedingHorizonMPC:
     Per-cell heterogeneity is added as target = mean + z * std(tau), z fixed per
     cell, with the experimental spread itself gated static -> flow.
 
-    Two FIXED adaptation time constants (this is the reported dynamics)
-    ------------------------------------------------------------------
+    A SINGLE morphological adaptation time constant (this is the reported dynamics)
+    ------------------------------------------------------------------------------
     Between control instants the healthy morphology relaxes toward its target by
     the closed-form first-order step response (eq:stepsolution)
         y(t+dt) = y* - (y* - y0) * exp(-dt / tau),
-    with two DISTINCT, INPUT-INDEPENDENT constants (there is no tau = f(A_max)
-    scaling here — that is the deprecated legacy model):
-      * tau_orient = config.tau_orient_hours = 7.4 h  for ORIENTATION.
-        theta relaxes on the circle using the shortest-arc wrap
-        <psi> = ((psi + pi) mod 2pi) - pi. Calibrated so theta(6 h) = 20 deg
-        matches the reference imaging:  20 = 45*exp(-6/tau) => tau = 6/ln(45/20)
-        ~ 7.4 h.
-      * tau_adapt = config.tau_adapt_hours ~ 9 h  for ASPECT RATIO and AREA
-        (Table 1 nominal midpoint of 6-12 h).
+    with ONE data-calibrated, INPUT-INDEPENDENT constant tau = 7.4 h governing
+    BOTH morphological channels (there is no tau = f(A_max) scaling here — that is
+    the deprecated legacy model). Orientation and aspect ratio are driven by the
+    same cytoskeletal remodelling; only the orientation channel is calibrated
+    against imaging, and that single calibration fixes the shared constant:
+      * ORIENTATION (config.tau_orient_hours = 7.4 h): theta relaxes on the circle
+        using the shortest-arc wrap <psi> = ((psi + pi) mod 2pi) - pi. Calibrated
+        so theta(6 h) = 20 deg matches the reference imaging:
+        20 = 45*exp(-6/tau) => tau = 6/ln(45/20) ~ 7.4 h.
+      * ASPECT RATIO (config.tau_adapt_hours = 7.4 h): rho relaxes toward
+        rho_target(tau) with the SAME constant (previously 9.0 h; unified onto the
+        single calibrated value — there is no independent aspect-ratio timecourse
+        to justify a distinct value). The two config fields are kept separate,
+        both 7.4 h, only so a sensitivity study can perturb them independently;
+        physically they are one constant.
+    Cell AREA is NOT relaxed with a temporal constant on the reported path: it is
+    fixed by the Voronoi tessellation (spatial model). tau_adapt therefore governs
+    the ASPECT RATIO only.
 
     Senescence — reduced population ODEs (NOT a per-cell stress clock)
     -----------------------------------------------------------------
@@ -758,10 +767,14 @@ class RecedingHorizonMPC:
         self.alpha_gamma = config.alpha_gamma
         self.tau_opt = config.tau_opt
         self.tau_act = config.tau_act
-        self.tau_adapt = config.tau_adapt_hours   # shared: aspect ratio (rho) and area
-        # Dedicated orientation time constant: theta relaxes from theta_stat=45 deg toward
+        # ASPECT-RATIO (rho) relaxation constant only; 7.4 h, equal to tau_orient
+        # (one physical morphological constant). Cell AREA is fixed by the Voronoi
+        # tessellation, NOT relaxed with this constant on the reported path.
+        self.tau_adapt = config.tau_adapt_hours   # h — aspect-ratio relaxation (= tau_orient = 7.4 h)
+        # Orientation time constant: theta relaxes from theta_stat=45 deg toward
         # the parallel target theta*=0 deg, calibrated so theta(6 h)=20 deg matches the
         # reference imaging:  20 = 45*exp(-6/tau)  ->  tau = 6/ln(45/20) ~ 7.4 h.
+        # tau_adapt is set equal to this single calibrated value.
         self.tau_orient = getattr(config, 'tau_orient_hours', 7.4)
         self.theta_stat = np.radians(THETA_STAT_DEG)
         self.theta_flow = np.radians(THETA_FLOW_DEG)
@@ -800,12 +813,13 @@ class RecedingHorizonMPC:
           1. Population compartments (senescence): integrate ``population_reduced_rhs``
              (eq:reduced) over [0, dt] with solve_ivp/RK45.
           2. Aspect ratio rho_h: closed-form relaxation toward rho_target(tau)
-             with the FIXED tau_adapt (~9 h).
+             with the FIXED tau_adapt (7.4 h = tau_orient).
           3. Orientation theta_h: closed-form relaxation on the circle
              (shortest-arc wrap) toward theta_target(tau) with the FIXED
              tau_orient (7.4 h).
-        No input-dependent time-constant scaling is used (that is the deprecated
-        legacy model).
+        A single morphological constant (7.4 h) governs both channels; cell area
+        is set by the tessellation, not relaxed here. No input-dependent
+        time-constant scaling is used (that is the deprecated legacy model).
         """
         dt = self.dt_h if dt is None else dt
         pop, rho_h, theta_h = state['pop'], state['rho_h'], state['theta_h']

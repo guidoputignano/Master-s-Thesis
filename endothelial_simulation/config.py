@@ -111,11 +111,24 @@ class SimulationConfig:
         self.tau_act = 0.5            # Source: Table 1, main.tex — tau_act = 0.5 Pa
         self.rho_star = 2.3           # Source: Table 1, main.tex — rho* = 2.3 (-)
         self.theta_star = 0.0         # orientation target theta* = 0 deg (parallel / perfect alignment); 20 deg is now the t=6 h transient
-        self.tau_adapt_hours = 9.0    # Source: Table 1, main.tex — tau_adapt = 6-12 h (nominal midpoint) — aspect ratio / area
-        # Orientation channel only: theta relaxes from theta_stat=45 deg toward theta*=0 deg,
-        # calibrated so theta(6 h)=20 deg matches the reference imaging (Chala/Nafsika):
+        # ASPECT-RATIO adaptation time constant (hours). Set equal to
+        # tau_orient_hours (7.4 h): orientation and aspect ratio are driven by the
+        # same cytoskeletal remodelling, and only the orientation constant is
+        # calibrated against imaging (theta(6 h)=20 deg => 6/ln(45/20) ~ 7.4 h).
+        # There is no independent aspect-ratio timecourse to justify a distinct
+        # value, so a single, data-calibrated morphological constant is the
+        # parsimonious choice (was 9.0 h, the Table-1 6-12 h midpoint). NOTE: this
+        # constant governs ASPECT RATIO only — cell AREA is fixed by the Voronoi
+        # tessellation and is not relaxed with a temporal constant on the paper path.
+        self.tau_adapt_hours = 7.4    # hours — aspect-ratio adaptation; equals tau_orient_hours (one physical constant)
+        # Orientation adaptation time constant (hours): theta relaxes from
+        # theta_stat=45 deg toward theta*=0 deg, calibrated so theta(6 h)=20 deg
+        # matches the reference imaging (Chala/Nafsika):
         #   20 = 45*exp(-6/tau)  ->  tau = 6/ln(45/20) ~ 7.4 h
-        self.tau_orient_hours = 7.4   # orientation adaptation time constant (h)
+        # Kept as a SEPARATE field from tau_adapt_hours (both = 7.4 h, representing
+        # one physical constant) so the planned sensitivity study can still sweep
+        # orientation and aspect-ratio constants independently.
+        self.tau_orient_hours = 7.4   # hours — orientation adaptation time constant (see above)
         self.target_area_healthy_um2 = 2354.0   # Source: Table 1, main.tex — A_E* = 2354 um^2
         # Population / senescence kinetics (eq:gamma_quad, eq:density)
         self.gamma_min = 0.00278      # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
@@ -137,8 +150,8 @@ class SimulationConfig:
         # (TemporalDynamicsModel.calculate_A_max / calculate_tau /
         # update_cell_responses), which is NOT used by run_mpc_simulation / the
         # reported model. The reported dynamics use the gated static->flow targets
-        # and the fixed adaptation constants (tau_orient_hours = 7.4 h,
-        # tau_adapt_hours = 9.0 h) defined above.
+        # and the single fixed morphological adaptation constant defined above
+        # (tau_orient_hours = tau_adapt_hours = 7.4 h).
         #
         # These five fields were previously assigned twice in __init__; the
         # values kept here are the ones that were already in effect (the second,

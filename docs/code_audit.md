@@ -157,6 +157,11 @@ visible.
 
 ## 0.3 `tau_adapt_hours` and `tau_orient_hours`
 
+> **Superseded (later change, same branch):** `tau_adapt_hours` has since been
+> unified to **7.4 h** (= `tau_orient_hours`), and the "area" role was corrected
+> (area is set by the tessellation, not relaxed). The findings below describe the
+> pre-change state. See `docs/tau_adapt_unification.md`.
+
 * **`tau_adapt_hours`** — defined once at `config.py:105` as `9.0` (h), the
   Table-1 nominal midpoint for aspect-ratio/area adaptation. Grep shows **no
   override anywhere** — neither `run_mpc.build_config()` nor `main.py` nor the

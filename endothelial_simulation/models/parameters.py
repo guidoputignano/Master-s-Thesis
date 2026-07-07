@@ -27,7 +27,12 @@ class ModelParameters:
         self.tau_act = 0.5            # Source: Table 1, main.tex — tau_act = 0.5 Pa
         self.rho_star = 2.3           # Source: Table 1, main.tex — rho* = 2.3 (-)
         self.theta_star = 0.0         # orientation target theta* = 0 deg (parallel / perfect alignment); 20 deg is now the t=6 h transient
-        self.tau_adapt_hours = 9.0    # Source: Table 1, main.tex — tau_adapt = 6-12 h (nominal) — aspect ratio / area
+        # h — aspect-ratio adaptation constant, unified to 7.4 h (= orientation
+        # constant; one morphological constant). Governs ASPECT RATIO only — cell
+        # AREA is fixed by the tessellation, not relaxed. NOTE: this ModelParameters
+        # class is an unused parallel copy; the reported config is SimulationConfig
+        # (config.py). Kept in sync to avoid a contradictory stale value.
+        self.tau_adapt_hours = 7.4
         # eq:gamma_quad parameters
         self.gamma_min = 0.00278      # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
         self.alpha_gamma = 0.00497    # Source: Table 1, main.tex — alpha_gamma = 0.00497 Pa^-2 h^-1
