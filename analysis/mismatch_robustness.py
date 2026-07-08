@@ -726,8 +726,8 @@ def figure_joint_distributions(result, out_noext):
     ax2.set_xlabel('closed-loop cost $J$'); ax2.set_ylabel('LHS samples')
     ax2.legend(loc='best'); ax2.set_title('(b) closed-loop cost')
 
-    fig.suptitle('Joint mismatch over the Latin hypercube: feedback keeps the '
-                 'regulated outputs tightly distributed', fontsize=10)
+    fig.suptitle('Joint mismatch over the Latin hypercube: the regulated outputs '
+                 'remain tightly distributed, well within the constraint', fontsize=10)
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     _savefig(fig, out_noext)
 
@@ -765,26 +765,43 @@ def figure_morph_sweep(result, out_noext):
 
 
 def figure_tracking_error(result, out_noext):
-    """Closed-loop versus open-loop regulation error of the regulated outputs
-    relative to the nominal-plant reference, over the joint ensemble."""
+    """Closed-loop versus open-loop regulation error of the regulated outputs,
+    shown as the ratio of the closed-loop error to the open-loop error over the
+    joint ensemble. The three outputs differ by orders of magnitude in their
+    units, so the ratio is the readable way to expose the small correction that
+    feedback provides. A ratio below one means feedback reduces the error."""
     _style()
     fields = [('rmse_phi_sen_mean', r'$\phi_{\mathrm{sen}}$'),
               ('rmse_rho_bar_mean', r'$\bar{\rho}$'),
-              ('rmse_varphi_bar_deg_mean', r'$\bar{\varphi}$ (deg)')]
-    means = {cfg: [] for cfg in ('closed', 'open')}
-    for field, _ in fields:
-        for cfg in ('closed', 'open'):
-            vals = [x['aggregate'][cfg][field] for x in result['joint']]
-            means[cfg].append(float(np.mean(vals)))
+              ('rmse_varphi_bar_deg_mean', r'$\bar{\varphi}$')]
+    ratios = []
+    abs_closed = []
+    abs_open = []
+    labels = []
+    for field, lbl in fields:
+        cl = float(np.mean([x['aggregate']['closed'][field] for x in result['joint']]))
+        ol = float(np.mean([x['aggregate']['open'][field] for x in result['joint']]))
+        ratios.append(cl / ol if ol > 0 else 1.0)
+        abs_closed.append(cl); abs_open.append(ol); labels.append(lbl)
 
-    x = np.arange(len(fields)); w = 0.36
-    fig, ax = plt.subplots(figsize=(6.4, 3.8))
-    ax.bar(x - w / 2, means['closed'], width=w, color='C0', alpha=0.85, label='closed-loop')
-    ax.bar(x + w / 2, means['open'], width=w, color='C3', alpha=0.85, label='open-loop')
-    ax.set_xticks(x); ax.set_xticklabels([lbl for _, lbl in fields])
-    ax.set_ylabel('RMS deviation from nominal-plant reference')
-    ax.set_title('Regulation error under joint mismatch, feedback vs feedforward')
-    ax.legend(loc='best')
+    x = np.arange(len(fields))
+    fig, ax = plt.subplots(figsize=(6.6, 3.9))
+    colors = ['C3' if r > 1.0 else 'C0' for r in ratios]
+    ax.bar(x, ratios, width=0.5, color=colors, alpha=0.85)
+    ax.axhline(1.0, color='k', lw=1.0)
+    span = max(0.02, max(abs(r - 1.0) for r in ratios) * 1.6)
+    ax.set_ylim(1.0 - span, 1.0 + span)
+    for i, r in enumerate(ratios):
+        off = span * 0.08
+        ax.text(i, r + (off if r >= 1.0 else -off), f'{(r - 1.0) * 100:+.2f}%',
+                ha='center', va='bottom' if r >= 1.0 else 'top', fontsize=9)
+        ax.text(i, 1.0 - span * 0.86,
+                f'open\n{abs_open[i]:.2e}', ha='center', va='bottom', fontsize=7, color='0.35')
+    ax.set_xticks(x); ax.set_xticklabels(labels)
+    ax.set_ylabel('closed-loop / open-loop regulation error')
+    ax.set_title('Feedback correction of the regulation error under joint mismatch\n'
+                 '(below one, feedback reduces the error; above one, feedforward is better)',
+                 fontsize=9.5)
     fig.tight_layout()
     _savefig(fig, out_noext)
 
