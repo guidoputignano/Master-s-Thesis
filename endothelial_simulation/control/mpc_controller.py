@@ -1194,7 +1194,7 @@ def _reconcile_senescence(simulator, pop):
 
 
 def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
-                       render_minutes=(0, 15, 30, 45)):
+                       render_minutes=(0, 15, 30, 45), plant=None):
     """
     Run the receding-horizon MPC closed loop on `simulator` (main.tex, eq:ocp).
 
@@ -1203,6 +1203,17 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
     `render_minutes` sub-points (default 0/15/30/45) to produce smooth frames of
     the re-rendered Voronoi tessellation. After the run the frames are assembled
     into an animation and three summary figures are written.
+
+    Parameters
+    ----------
+    plant : RecedingHorizonMPC or None, optional
+        Object used to advance the authoritative reduced state between control
+        instants (its `predict_step` defines the true dynamics of the plant). It
+        supports parametric plant-model mismatch studies: the controller keeps
+        optimising with the nominal `mpc`, while `plant` may carry perturbed
+        identified parameters. When None (the default) the plant is bound to the
+        nominal `mpc`, so the reported run is unchanged. See
+        `docs/mismatch_plant_audit.md`.
 
     Returns a dict with the control/output log and the list of frame paths.
     """
@@ -1213,6 +1224,11 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
     os.makedirs(frames_dir, exist_ok=True)
 
     mpc = RecedingHorizonMPC(config)
+    # Plant that advances the true reduced state. Defaults to the nominal
+    # controller model, in which case the closed loop is identical to the
+    # reported run; a distinct object injects parametric mismatch (Task 1).
+    if plant is None:
+        plant = mpc
     temporal = simulator.models['temporal']
 
     # === REPRODUCIBILITY ===
@@ -1280,8 +1296,9 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
         # intermediate frames via the closed-form step response (eq:stepsolution)
         for m in render_minutes:
             th = m / 60.0
-            # reduced sub-state (for synced dashboard time series)
-            x_sub = mpc.predict_step(x0, tau_k, dt=th)
+            # reduced sub-state (for synced dashboard time series); advanced by
+            # the plant (nominal unless a perturbed plant was injected)
+            x_sub = plant.predict_step(x0, tau_k, dt=th)
             phi_s, rho_s, varphi_s = mpc.outputs(x_sub)
             halign_s = flow_alignment_angle(x_sub['theta_h'])
             t_abs = k + th
@@ -1310,8 +1327,9 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
             c.target_aspect_ratio = tgt_rho
             c.target_orientation = tgt_theta
 
-        # advance the authoritative reduced state by 1 h (eq:flowmap)
-        x_state = mpc.predict_step(x0, tau_k)
+        # advance the authoritative reduced state by 1 h (eq:flowmap); the plant
+        # defines the true dynamics (nominal unless a perturbed plant was injected)
+        x_state = plant.predict_step(x0, tau_k)
         pop_end = x_state['pop']
         pm = simulator.models['population']
         pm.state['E'] = list(pop_end[:mpc.N + 1])
