@@ -3,6 +3,16 @@ Model parameters for the endothelial cell mechanotransduction simulation.
 
 This module contains all parameters related to cell behavior, shear stress response,
 temporal dynamics, and population characteristics.
+
+STALE / PRE-REFACTOR NOTE (Task 5): this ``ModelParameters`` table is NOT used by
+the reported model (``run_mpc_simulation`` / ``RecedingHorizonMPC`` and
+``PopulationDynamicsModel`` read ``SimulationConfig``, not this class). It still
+carries the pre-refactor senescence law — the symmetric quadratic
+``gamma(tau) = gamma_min + alpha_gamma (tau - tau_opt)^2`` with ``alpha_gamma`` /
+``tau_opt`` — which the reported model replaced with a monotone-decreasing Hill
+law (``gamma_min`` / ``gamma_max`` / ``tau_h``; see ``config.py`` and
+``models/population_dynamics.gamma_tau_hill``). It is left unchanged here because
+nothing on the reported path imports it; do not use it as the source of truth.
 """
 
 import numpy as np

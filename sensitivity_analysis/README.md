@@ -5,6 +5,26 @@ model, built on the **corrected** model implementations in
 `endothelial_simulation/models/` (see [`audit.md`](audit.md) for the corrections
 made to bring the code in line with the published paper, `main.tex`).
 
+> **STALE / PRE-REFACTOR NOTE (Task 5).** This suite predates the Task 5
+> refactor of the senescence-induction law and the MPC cost. It is left in place
+> but has not been re-derived around the new model, so its scientific content is
+> stale in two ways:
+> - **Senescence law.** `sensitivity_sobol.py` and `sensitivity_oat.py` perturb
+>   the old quadratic-law parameters `alpha_gamma` / `tau_opt`. The reported model
+>   now uses a monotone-decreasing **Hill** law (`gamma_min` / `gamma_max` /
+>   `tau_h`; see `config.py`), so those specific perturbations no longer drive the
+>   model (the scripts still run — the attributes are simply inert on the reduced
+>   kernel).
+> - **MPC cost.** The soft senescence weight `w_phi` was removed (senescence is now
+>   a hard constraint). `sensitivity_mpc_weights.py` was updated **only enough to
+>   keep running** against the new constructor (its `w_phi` weight sets are gone);
+>   it now sweeps `w_rho:w_varphi:w_u`. `sensitivity_energy_weights.py` uses a
+>   different, unrelated `w_phi` (a morphological-energy alignment weight) and is
+>   unaffected.
+>
+> Regenerate this suite against the Hill law / hard-constraint MPC before quoting
+> its numbers post-refactor.
+
 ## Contents
 
 | File | Purpose |

@@ -26,11 +26,13 @@ Identified parameters perturbed in the plant
 1. the morphological adaptation constant (nominal 7.4 h, applied to both
    `tau_adapt` and `tau_orient`),
 2. gamma_min   (nominal from config),
-3. alpha_gamma (nominal from config),
-4. tau_opt     (nominal from config),
-through the senescence-induction rate gamma(tau) = gamma_min + alpha_gamma
-(tau - tau_opt)^2 and the morphological relaxation rates. The set is configurable,
-with these four as the default.
+3. gamma_max   (nominal from config),
+4. tau_h       (senescence Hill half-max shear; nominal from config),
+through the monotone-decreasing Hill senescence-induction rate
+gamma(tau) = gamma_min + (gamma_max - gamma_min) tau_h^n / (tau_h^n + tau^n) and
+the morphological relaxation rates. The set is configurable, with these four as
+the default. (Task 5 replaced the earlier quadratic-law identified set
+gamma_min/alpha_gamma/tau_opt with the Hill-law set gamma_min/gamma_max/tau_h.)
 
 Perturbation sampling (epistemic), seeded and reproducible
 ----------------------------------------------------------
@@ -71,8 +73,9 @@ rho_bar(k)      : population mean aspect ratio at each boundary, dimensionless.
 varphi_bar(k)   : population mean flow-alignment angle at each boundary, in degrees.
 terminal values : phi_sen, rho_bar, varphi_bar at t = NUM_STEPS.
 J               : realised closed-loop cost on the applied (true) trajectory,
-                  evaluated with the controller's own stage weights,
-                  J = sum_k [ w_phi phi_sen(k)^2 + w_rho (rho_bar(k) - rho_flow)^2
+                  evaluated with the controller's own stage weights (Task 5,
+                  Part A: no soft senescence term; senescence is a hard constraint),
+                  J = sum_k [ w_rho (rho_bar(k) - rho_flow)^2
                             + w_varphi varphi_bar(k)^2 + w_u (tau(k) - tau(k-1))^2 ],
                   over k = 1..NUM_STEPS with tau(0) = 0; varphi_bar in radians here.
 violations      : number and timing of boundaries at which phi_sen exceeds the hard
@@ -124,13 +127,15 @@ from endothelial_simulation.control.mpc_controller import (
 from analysis.horizon_sensitivity import generate_initial_population
 
 # --- Default study configuration ---------------------------------------------
-PARAM_KEYS = ['morph', 'gamma_min', 'alpha_gamma', 'tau_opt']
+PARAM_KEYS = ['morph', 'gamma_min', 'gamma_max', 'tau_h']
 PARAM_LABELS = {
     'morph': 'adaptation constant',
     'gamma_min': r'$\gamma_{\min}$',
-    'alpha_gamma': r'$\alpha_\gamma$',
-    'tau_opt': r'$\tau_{\mathrm{opt}}$',
+    'gamma_max': r'$\gamma_{\max}$',
+    'tau_h': r'$\tau_h$',
 }
+# Map identified-parameter keys to RecedingHorizonMPC attribute names.
+PARAM_ATTR = {'gamma_min': 'gamma_min', 'gamma_max': 'gamma_max', 'tau_h': 'tau_h_sen'}
 REL_PERTURB = 0.20           # one-at-a-time and joint relative range (plus/minus)
 MORPH_RANGE = (6.0, 12.0)    # calibrated range of the adaptation constant, hours
 MORPH_SWEEP = [6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0]  # explicit OAT sweep
@@ -150,8 +155,8 @@ def nominal_params(config):
     return {
         'morph': float(config.tau_adapt_hours),   # == tau_orient_hours
         'gamma_min': float(config.gamma_min),
-        'alpha_gamma': float(config.alpha_gamma),
-        'tau_opt': float(config.tau_opt),
+        'gamma_max': float(config.gamma_max),
+        'tau_h': float(config.tau_h_sen),
     }
 
 
@@ -161,16 +166,18 @@ def make_plant(config, params=None):
     The controller and the plant share the same class; only the plant's four
     identified attributes are overridden. Missing keys default to nominal. The
     morphological adaptation constant is written to both `tau_adapt` and
-    `tau_orient`, which hold one physical constant in the reported model.
+    `tau_orient`, which hold one physical constant in the reported model. The
+    senescence-law keys map to the controller's Hill attributes via PARAM_ATTR
+    (e.g. 'tau_h' -> 'tau_h_sen').
     """
     plant = RecedingHorizonMPC(config)
     if params:
         if 'morph' in params and params['morph'] is not None:
             plant.tau_adapt = float(params['morph'])
             plant.tau_orient = float(params['morph'])
-        for key in ('gamma_min', 'alpha_gamma', 'tau_opt'):
+        for key, attr in PARAM_ATTR.items():
             if params.get(key) is not None:
-                setattr(plant, key, float(params[key]))
+                setattr(plant, attr, float(params[key]))
     return plant
 
 
@@ -191,10 +198,11 @@ def _initial_state(config, controller, seed, pop0=None):
 
 
 def _cost_and_violations(controller, tau, phi, rho, varphi):
+    # Task 5 (Part A): no soft senescence term (w_phi * phi_sen^2); senescence is
+    # a hard constraint. Realised cost is tracking + move regularizer only.
     tau_prev = np.concatenate([[0.0], tau[:-1]])
     J = float(np.sum(
-        controller.w_phi * phi[1:] ** 2
-        + controller.w_rho * (rho[1:] - RHO_FLOW) ** 2
+        controller.w_rho * (rho[1:] - RHO_FLOW) ** 2
         + controller.w_varphi * varphi[1:] ** 2
         + controller.w_u * (tau - tau_prev) ** 2))
     violation_hours = [k for k in range(1, len(phi))
@@ -355,8 +363,8 @@ def param_ranges(nom, rel=REL_PERTURB, morph_range=MORPH_RANGE):
     return {
         'morph': morph_range,
         'gamma_min': (nom['gamma_min'] * (1 - rel), nom['gamma_min'] * (1 + rel)),
-        'alpha_gamma': (nom['alpha_gamma'] * (1 - rel), nom['alpha_gamma'] * (1 + rel)),
-        'tau_opt': (nom['tau_opt'] * (1 - rel), nom['tau_opt'] * (1 + rel)),
+        'gamma_max': (nom['gamma_max'] * (1 - rel), nom['gamma_max'] * (1 + rel)),
+        'tau_h': (nom['tau_h'] * (1 - rel), nom['tau_h'] * (1 + rel)),
     }
 
 
@@ -455,7 +463,7 @@ def _run_rows(kind, label, params, records):
             rows.append({
                 'kind': kind, 'label': label,
                 'morph': params.get('morph'), 'gamma_min': params.get('gamma_min'),
-                'alpha_gamma': params.get('alpha_gamma'), 'tau_opt': params.get('tau_opt'),
+                'gamma_max': params.get('gamma_max'), 'tau_h': params.get('tau_h'),
                 'config': cfg, 'seed': r['seed'],
                 'J': r['J'], 'terminal_phi_sen': r['terminal_phi_sen'],
                 'terminal_rho_bar': r['terminal_rho_bar'],
@@ -470,7 +478,7 @@ def _run_rows(kind, label, params, records):
 
 
 def write_raw_csv(result, path):
-    fields = ['kind', 'label', 'morph', 'gamma_min', 'alpha_gamma', 'tau_opt',
+    fields = ['kind', 'label', 'morph', 'gamma_min', 'gamma_max', 'tau_h',
               'config', 'seed', 'J', 'terminal_phi_sen', 'terminal_rho_bar',
               'terminal_varphi_bar_deg', 'n_violations', 'rmse_phi_sen',
               'rmse_rho_bar', 'rmse_varphi_bar_deg', 'solver_success_rate']

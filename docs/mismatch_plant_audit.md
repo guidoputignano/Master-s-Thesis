@@ -4,6 +4,17 @@ Status: read-only audit. No code was modified to produce this note. The
 mismatch-robustness mechanism (Task 1) and the study (Tasks 2 to 5) depend on the
 conclusions recorded here.
 
+> **POST-REFACTOR NOTE (Task 5).** The STRUCTURAL conclusions below — where the
+> true state is advanced (the two `predict_step` sites), that the plant and the
+> controller share the same object/parameters unless a distinct plant is
+> injected, and that per-cell rendering does not feed back — are unchanged by the
+> Task 5 refactor. Only the NAMES of the identified senescence parameters changed:
+> the senescence-induction rate `population_reduced_rhs` now reads is the
+> monotone Hill law in `gamma_min` / `gamma_max` / `tau_h` (not the quadratic
+> `gamma_min` / `alpha_gamma` / `tau_opt` written below), and the `xi` argument
+> was removed. Read the `alpha_gamma` / `tau_opt` / `xi` mentions below as the
+> pre-refactor parameterisation of the same senescence channel.
+
 ## Where the true plant state is advanced
 
 The reported closed loop keeps an authoritative reduced state

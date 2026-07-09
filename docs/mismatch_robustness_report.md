@@ -4,6 +4,22 @@ Companion to `analysis/mismatch_robustness.py` and the audit note
 `docs/mismatch_plant_audit.md`. This report states the control-theoretic result.
 It does not draw biological conclusions.
 
+> **STALE / PRE-REFACTOR NOTE (Task 5).** The numbers in this report were produced
+> BEFORE the Task 5 refactor of the model and therefore describe the pre-refactor
+> reported model, in which (i) the senescence-induction rate was the symmetric
+> quadratic `gamma(tau) = gamma_min + alpha_gamma (tau - tau_opt)^2` and (ii) the
+> MPC cost contained a soft senescence term `w_phi * phi_sen^2`. The reported
+> model now uses a monotone-decreasing **Hill** law
+> (`gamma_min`/`gamma_max`/`tau_h`) and enforces senescence as a **hard
+> constraint** (no `w_phi`); a single hard move/slew bound was also added. The
+> identified-parameter set of the study was accordingly changed from
+> `{morph, gamma_min, alpha_gamma, tau_opt}` to `{morph, gamma_min, gamma_max,
+> tau_h}`. `analysis/mismatch_robustness.py` was updated to run against the new
+> model, but the figures, CSVs and the specific quantities quoted below have NOT
+> been regenerated. Re-run the study to refresh them before quoting post-refactor
+> numbers. The Task-0 mechanism conclusion (where and how the plant is advanced)
+> is structural and still holds.
+
 ## Task 0 audit conclusion
 
 The reported closed loop advances an authoritative reduced state

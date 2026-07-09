@@ -130,12 +130,58 @@ class SimulationConfig:
         # orientation and aspect-ratio constants independently.
         self.tau_orient_hours = 7.4   # hours — orientation adaptation time constant (see above)
         self.target_area_healthy_um2 = 2354.0   # Source: Table 1, main.tex — A_E* = 2354 um^2
-        # Population / senescence kinetics (eq:gamma_quad, eq:density)
-        self.gamma_min = 0.00278      # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
-        self.alpha_gamma = 0.00497    # Source: Table 1, main.tex — alpha_gamma = 0.00497 Pa^-2 h^-1
-        self.tau_opt = 1.4            # Source: Table 1, main.tex — tau_opt = 1.4 Pa
-        self.xi = 0.05                # Source: Table 1, main.tex — xi = 0.05 per stage
-        self.phi_sen_max = 0.30       # Source: Table 1, main.tex — phi_sen^max = 30% of population
+        # === MODEL-STRUCTURE FLAGS (Task 5 refactor) ===
+        # Select which arms of the senescence / population model are active.
+        # The defaults are the reported structure except where a comment marks a
+        # deliberate change of simulation output.
+        self.INCLUDE_REPLICATIVE_ARM = True
+        #   True : keep the replicative ladder E_0..E_N and the telomere-
+        #          senescence compartment S_tel (terminal division -> S_tel).
+        #   False: collapse the ladder to a single healthy pool N_E and drop
+        #          S_tel (no replicative/telomere senescence; stress arm only).
+        self.MODEL_GROWTH_TO_CONFLUENCE = False
+        #   True : keep the contact-inhibition density factor g(N_E)=1/(1+N_E/K).
+        #   False: drop g and K (set g == 1); proliferation is density-independent
+        #          at rate r. NOTE: dropping g CHANGES simulation output relative
+        #          to g-on (proliferation is no longer slowed by density); r is
+        #          left at its Table-1 value (the folded constant defaults to 1).
+        self.INCLUDE_SUPRAPHYSIOLOGICAL_ARM = False
+        #   True : add the high-shear damage term gamma_d*tau^m/(tau_d^m+tau^m)
+        #          to the induction rate (see gamma_d/tau_d/m_hill below).
+        #   False: no supraphysiological damage arm.
+
+        # === SENESCENCE-INDUCTION RATE gamma(tau): monotone-decreasing Hill ===
+        # Replaces the earlier symmetric quadratic (eq:gamma_quad). Low shear
+        # (atheroprone) -> high induction; high shear (atheroprotective) -> low:
+        #
+        #     gamma(tau) = gamma_min + (gamma_max - gamma_min)
+        #                              * tau_h^n / (tau_h^n + tau^n)
+        #
+        # IMPORTANT (provenance): the Hill FORM is a modelling choice chosen to
+        # match the cited monotone shear-protection shape (KLF2/P2X4 flow
+        # signalling; atheroprone vs atheroprotective wall-shear boundary). It is
+        # NOT an equation fitted to data in any single source. Each parameter is
+        # tagged [anchored] (traceable to a cited value/threshold) or [assumed]
+        # (illustrative, sweepable); assumed values are NOT fitted or measured.
+        self.gamma_min = 0.00278   # h^-1 [anchored] high-shear floor plateau (Table 1, main.tex)
+        self.gamma_max = 0.0125    # h^-1 [assumed]  low-shear (tau->0) plateau; sweepable.
+        #                                 Illustrative value; equals the old quadratic rate at
+        #                                 tau=0 (gamma_min + alpha_gamma*tau_opt^2 = 0.00278 +
+        #                                 0.00497*1.4^2 ~ 0.0125). Not a fitted quantity.
+        self.tau_h_sen = 0.5       # Pa   [anchored] half-max shear of the protective Hill.
+        #                                 Atheroprotective / KLF2-P2X4 boundary (~0.5 Pa). Kept
+        #                                 SEPARATE from tau_act (also 0.5 Pa): same physical
+        #                                 threshold but a different equation, so a future study
+        #                                 can sweep them independently (cf. tau_adapt/tau_orient).
+        self.n_hill = 2            # -    [fixed]    protective Hill exponent (shape constant,
+        #                                 plausible 2-4); fixed at 2, NOT fitted.
+        # Optional supraphysiological (high-shear) damage arm, active only when
+        # INCLUDE_SUPRAPHYSIOLOGICAL_ARM is True: + gamma_d*tau^m/(tau_d^m+tau^m)
+        self.gamma_d = 0.0125      # h^-1 [assumed]  high-shear damage plateau; sweepable.
+        self.tau_d = 7.0           # Pa   [assumed]  damage half-max shear (supraphysiological ~5-10 Pa).
+        self.m_hill = 2            # -    [fixed]    damage Hill exponent (plausible 2-4); fixed at 2.
+
+        self.phi_sen_max = 0.30    # -    Source: Table 1, main.tex — phi_sen^max = 30% of population
 
         # === TELOMERE SENESCENCE PARAMETERS ===
         self.max_divisions = 16  # Source: Table 1, main.tex — N (Hayflick limit, HUVEC) = 16 (midpoint of [15,18] PD)
@@ -172,15 +218,18 @@ class SimulationConfig:
         # === POPULATION DYNAMICS PARAMETERS ===
         self.proliferation_rate = 0.025  # Source: Table 1, main.tex — r = 0.02-0.03 h^-1 (nominal 0.025)
         self.carrying_capacity = 5.5e4   # Source: Table 1, main.tex — K = 5-6e4 cells/cm^2 (nominal 5.5e4)
-        self.death_rate_healthy = 0 #0.0001
-        self.death_rate_senescent_tel = 0 #0.00033
-        self.death_rate_senescent_stress = 0 #0.00042
-        self.senescence_induction_factor = 0 #0.0000008
-        self.senolytic_concentration = 0.0
-        self.senolytic_efficacy_tel = 1.0
-        self.senolytic_efficacy_stress = 1.2
+        # Task 5 population pruning (Part C): the treatment-free six-hour reported
+        # regime sets death rates, SASP induction, the senolytic block and the
+        # stem-cell input to zero. These terms are REMOVED (not zero-weighted).
+        # The reduced law is
+        #     dE_i/dt   = 2 r g E_{i-1} - r g E_i - gamma(tau) E_i   (replicative arm)
+        #     dS_tel/dt = r g E_N
+        #     dS_str/dt = sum_i gamma(tau) E_i    (xi=0 -> gamma(tau) N_E)
+        # with g == 1 unless MODEL_GROWTH_TO_CONFLUENCE is True.
 
-        # Deterministic senescence parameters
+        # Deterministic senescence parameters (per-cell resistance distribution;
+        # used by the spatial/visual layer and reserved for the optional Part D
+        # low-shear dose rule).
         self.base_cellular_resistance = 0.5  # Base resistance threshold (adjusted for stress_factor scale)
         self.resistance_variability = 0.2  # Cell-to-cell variability
 
