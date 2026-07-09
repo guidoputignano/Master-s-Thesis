@@ -4,36 +4,76 @@ Population dynamics model for endothelial cell mechanotransduction.
 import numpy as np
 
 
-def gamma_tau_quadratic(tau, gamma_min, alpha_gamma, tau_opt):
+def gamma_tau_hill(tau, gamma_min, gamma_max, tau_h, n,
+                   gamma_d=0.0, tau_d=None, m=2):
     """
-    U-shaped quadratic senescence-induction rate (eq:gamma_quad, main.tex):
+    Monotone-decreasing, bounded Hill senescence-induction rate.
 
-        gamma_tau(tau) = gamma_min + alpha_gamma * (tau - tau_opt)**2
+        gamma(tau) = gamma_min + (gamma_max - gamma_min) * tau_h^n / (tau_h^n + tau^n)
+                     [ + gamma_d * tau^m / (tau_d^m + tau^m) ]   (optional damage arm)
 
-    Pure-numpy helper with no object access, so the MPC optimiser can call it
-    inside the ODE right-hand side without Python/attribute overhead.
+    Low shear (atheroprone) gives high induction (-> gamma_max as tau -> 0); high
+    shear (atheroprotective) gives low induction (-> gamma_min as tau -> inf).
+
+    IMPORTANT (provenance): the Hill FORM is a modelling choice matched to the
+    cited monotone shear-protection shape (KLF2/P2X4 flow signalling; atheroprone
+    vs atheroprotective wall-shear boundary). It is NOT an equation fitted to data
+    in any single source. `gamma_min` and `tau_h` are anchored to cited
+    values/thresholds; `gamma_max` (and the optional `gamma_d`) are assumed,
+    illustrative and sweepable — not fitted or measured.
+
+    Pure-numpy helper (no object access) so the MPC optimiser can call it inside
+    the ODE right-hand side without Python/attribute overhead.
+
+    Parameters:
+        tau:       wall shear stress (Pa), scalar or array
+        gamma_min: high-shear floor plateau rate (h^-1)   [tau -> inf]
+        gamma_max: low-shear plateau rate (h^-1)          [tau -> 0]
+        tau_h:     half-max shear of the protective Hill (Pa)
+        n:         protective Hill exponent (shape constant)
+        gamma_d:   optional supraphysiological damage amplitude (h^-1); 0 disables it
+        tau_d:     damage half-max shear (Pa); used only when gamma_d > 0
+        m:         damage Hill exponent
+
+    Returns:
+        senescence-induction rate gamma(tau) (h^-1), same shape as tau.
     """
-    return gamma_min + alpha_gamma * (tau - tau_opt) ** 2
+    tau_h_n = tau_h ** n
+    gamma = gamma_min + (gamma_max - gamma_min) * tau_h_n / (tau_h_n + tau ** n)
+    if gamma_d:
+        gamma = gamma + gamma_d * tau ** m / (tau_d ** m + tau ** m)
+    return gamma
 
 
-def population_reduced_rhs(state, tau, r, K, xi, gamma_min, alpha_gamma, tau_opt, N):
+def population_reduced_rhs(state, tau, r, K, gamma_min, gamma_max, tau_h, n, N,
+                           include_replicative=True, model_growth=False,
+                           gamma_d=0.0, tau_d=None, m=2):
     """
-    Standalone right-hand side of the reduced population ODE (eq:reduced, main.tex).
+    Standalone right-hand side of the reduced population ODE (eq:reduced, main.tex),
+    after the Task 5 refactor (Hill induction, xi removed, structure flags).
 
     This is the control-oriented kernel used by the MPC optimiser: it takes only
     numpy arrays / scalars (no Grid, no model object) so scipy.integrate.solve_ivp
-    can call it with minimal overhead.
+    can call it with minimal overhead. The senescence-induction rate is the SAME
+    Hill law (`gamma_tau_hill`) used by the per-cell population update.
 
-        dE_i/dt   = 2 r g(N_E) E_{i-1} - r g(N_E) E_i - gamma_tau(tau)(1+xi i) E_i
-        dS_tel/dt = r g(N_E) E_N
-        dS_str/dt = sum_i gamma_tau(tau)(1+xi i) E_i
-        g(N_E)    = 1 / (1 + N_E / K)                      (eq:density)
-        gamma_tau = gamma_min + alpha_gamma (tau - tau_opt)^2   (eq:gamma_quad)
+    Replicative arm ON (default), growth-to-confluence per `model_growth`:
+        dE_i/dt   = 2 r g E_{i-1} - r g E_i - gamma(tau) E_i
+        dS_tel/dt = r g E_N
+        dS_str/dt = sum_i gamma(tau) E_i = gamma(tau) N_E
+        g         = 1/(1 + N_E/K)  if model_growth else 1   (contact inhibition)
+
+    Replicative arm OFF: no division and no telomere senescence; the healthy pool
+    N_E is depleted only by stress-induced senescence:
+        dE_i/dt   = -gamma(tau) E_i,   dS_tel/dt = 0,   dS_str/dt = gamma(tau) N_E
 
     Parameters:
         state: array [E_0, ..., E_N, S_tel, S_str]  (length N + 3)
         tau:   wall shear stress (Pa)
-        r, K, xi, gamma_min, alpha_gamma, tau_opt, N: scalar parameters (Table 1)
+        r, K, N: proliferation rate, carrying capacity (count units), Hayflick N
+        gamma_min, gamma_max, tau_h, n, gamma_d, tau_d, m: Hill-law parameters
+        include_replicative: keep the E ladder + S_tel (True) or collapse (False)
+        model_growth: keep the density factor g(N_E) (True) or set g == 1 (False)
 
     Returns:
         numpy array of derivatives, same layout as `state`.
@@ -41,24 +81,29 @@ def population_reduced_rhs(state, tau, r, K, xi, gamma_min, alpha_gamma, tau_opt
     state = np.asarray(state, dtype=float)
     E = state[:N + 1]
     N_E = float(E.sum())
-    g = 1.0 / (1.0 + N_E / K)                                   # eq:density
-    gamma = gamma_tau_quadratic(tau, gamma_min, alpha_gamma, tau_opt)  # eq:gamma_quad
 
-    stage = np.arange(N + 1, dtype=float)
-    sen_rate = gamma * (1.0 + xi * stage)                       # gamma_tau (1 + xi i)
+    # Contact-inhibition density factor. When growth-to-confluence is not
+    # modelled, g == 1 (proliferation is density-independent); see config flag.
+    g = 1.0 / (1.0 + N_E / K) if model_growth else 1.0
 
-    dE = np.empty(N + 1)
-    # division in: 2 r g E_{i-1}; division out: r g E_i; senescence loss: sen_rate E_i
-    dE[0] = -r * g * E[0] - sen_rate[0] * E[0]
-    dE[1:] = 2.0 * r * g * E[:-1] - r * g * E[1:] - sen_rate[1:] * E[1:]
-
-    dS_tel = r * g * E[N]                                       # terminal division -> S_tel
-    dS_str = float(np.sum(sen_rate * E))                        # stress-induced senescence
+    # Senescence-induction rate (identical Hill law to the per-cell update).
+    gamma = gamma_tau_hill(tau, gamma_min, gamma_max, tau_h, n,
+                           gamma_d=gamma_d, tau_d=tau_d, m=m)
 
     dstate = np.empty_like(state)
-    dstate[:N + 1] = dE
-    dstate[N + 1] = dS_tel
-    dstate[N + 2] = dS_str
+    if include_replicative:
+        dE = np.empty(N + 1)
+        # division in: 2 r g E_{i-1}; division out: r g E_i; senescence loss: gamma E_i
+        dE[0] = -r * g * E[0] - gamma * E[0]
+        dE[1:] = 2.0 * r * g * E[:-1] - r * g * E[1:] - gamma * E[1:]
+        dstate[:N + 1] = dE
+        dstate[N + 1] = r * g * E[N]        # terminal division -> S_tel
+        dstate[N + 2] = gamma * N_E         # stress-induced senescence (xi=0)
+    else:
+        # Single healthy pool: no division, no telomere senescence.
+        dstate[:N + 1] = -gamma * E
+        dstate[N + 1] = 0.0                 # S_tel inert (replicative arm disabled)
+        dstate[N + 2] = gamma * N_E         # stress-induced senescence
     return dstate
 
 
@@ -84,21 +129,22 @@ class PopulationDynamicsModel:
         self.max_divisions = config.max_divisions
         self.r = config.proliferation_rate
         self.K = config.carrying_capacity
-        self.d_E = config.death_rate_healthy
-        self.d_S_tel = config.death_rate_senescent_tel
-        self.d_S_stress = config.death_rate_senescent_stress
-        self.gamma_S = config.senescence_induction_factor
 
-        # Paper (Table 1, main.tex) senescence-induction parameters (eq:gamma_quad)
-        self.gamma_min = getattr(config, 'gamma_min', 0.00278)    # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
-        self.alpha_gamma = getattr(config, 'alpha_gamma', 0.00497)  # Source: Table 1, main.tex — alpha_gamma = 0.00497 Pa^-2 h^-1
-        self.tau_opt = getattr(config, 'tau_opt', 1.4)            # Source: Table 1, main.tex — tau_opt = 1.4 Pa
-        self.xi = getattr(config, 'xi', 0.05)                     # Source: Table 1, main.tex — xi = 0.05 per stage
+        # Model-structure flags (Task 5); default to the reported structure.
+        self.include_replicative_arm = getattr(config, 'INCLUDE_REPLICATIVE_ARM', True)
+        self.model_growth_to_confluence = getattr(config, 'MODEL_GROWTH_TO_CONFLUENCE', False)
+        self.include_supraphysiological_arm = getattr(config, 'INCLUDE_SUPRAPHYSIOLOGICAL_ARM', False)
 
-        # Senolytic parameters
-        self.senolytic_conc = config.senolytic_concentration
-        self.sen_efficacy_tel = config.senolytic_efficacy_tel
-        self.sen_efficacy_stress = config.senolytic_efficacy_stress
+        # Senescence-induction rate gamma(tau): monotone-decreasing bounded Hill.
+        # The Hill FORM is a modelling choice matched to the cited shear-protection
+        # shape, not a fitted law (see gamma_tau_hill / config for provenance).
+        self.gamma_min = getattr(config, 'gamma_min', 0.00278)   # h^-1 [anchored]
+        self.gamma_max = getattr(config, 'gamma_max', 0.0125)    # h^-1 [assumed, sweepable]
+        self.tau_h_sen = getattr(config, 'tau_h_sen', 0.5)       # Pa   [anchored]
+        self.n_hill = getattr(config, 'n_hill', 2)               # -    [fixed shape]
+        self.gamma_d = getattr(config, 'gamma_d', 0.0125)        # h^-1 [assumed, sweepable]
+        self.tau_d = getattr(config, 'tau_d', 7.0)               # Pa   [assumed]
+        self.m_hill = getattr(config, 'm_hill', 2)               # -    [fixed shape]
 
         # Initialize population state
         self.initialize_state()
@@ -202,90 +248,30 @@ class PopulationDynamicsModel:
 
     def calculate_shear_stress_effect(self, tau):
         """
-        Calculate the effect of shear stress on senescence induction.
+        Senescence-induction rate gamma(tau) (h^-1): monotone-decreasing Hill.
+
+        Delegates to the SAME `gamma_tau_hill` used by the reduced kernel and the
+        MPC rollout, so the per-cell update and the control-oriented prediction
+        share one induction law. The supraphysiological damage arm is included
+        only when INCLUDE_SUPRAPHYSIOLOGICAL_ARM is set.
 
         Parameters:
             tau: Shear stress value (Pa)
 
         Returns:
-            Senescence induction rate gamma_tau (h^-1)
+            Senescence induction rate gamma(tau) (h^-1)
         """
-        # eq:gamma_quad, main.tex — U-shaped quadratic induction rate
-        #   gamma_tau(tau) = gamma_min + alpha_gamma * (tau - tau_opt)^2
-        # Source: Table 1, main.tex — gamma_min = 0.00278 h^-1
-        # Source: Table 1, main.tex — alpha_gamma = 0.00497 Pa^-2 h^-1
-        # Source: Table 1, main.tex — tau_opt = 1.4 Pa
-        return self.gamma_min + self.alpha_gamma * (tau - self.tau_opt) ** 2
+        gamma_d = self.gamma_d if self.include_supraphysiological_arm else 0.0
+        return gamma_tau_hill(tau, self.gamma_min, self.gamma_max,
+                              self.tau_h_sen, self.n_hill,
+                              gamma_d=gamma_d, tau_d=self.tau_d, m=self.m_hill)
 
-    def calculate_senolytic_effect(self, concentration, efficacy_factor=1.0):
-        """
-        Calculate the effect of senolytics on senescent cell death rate.
-
-        Parameters:
-            concentration: Senolytic concentration
-            efficacy_factor: Efficacy multiplier
-
-        Returns:
-            Death rate increase due to senolytics
-        """
-        if concentration <= 0:
-            return 0
-
-        # Sigmoid response curve
-        max_effect = 0.15 * efficacy_factor
-        ec50 = 5
-        hill = 3
-
-        effect = max_effect * (concentration ** hill) / (ec50 ** hill + concentration ** hill)
-
-        return effect
-
-    def calculate_senolytic_toxicity(self, concentration):
-        """
-        Calculate the toxic effect of senolytics on healthy cells.
-
-        Parameters:
-            concentration: Senolytic concentration
-
-        Returns:
-            Base toxicity to healthy cells
-        """
-        if concentration <= 0:
-            return 0
-
-        # Base toxicity with linear component
-        base_toxicity = 0.0004 * concentration
-
-        # Non-linear component with therapeutic window
-        max_toxicity = 0.05
-        ec50_toxicity = 20
-        hill_toxicity = 5
-
-        non_linear_toxicity = max_toxicity * (concentration ** hill_toxicity) / (
-                ec50_toxicity ** hill_toxicity + concentration ** hill_toxicity)
-
-        # Combine components
-        total_toxicity = base_toxicity + non_linear_toxicity
-
-        return total_toxicity
-
-    def calculate_stem_cell_distribution(self):
-        """
-        Calculate the distribution of stem cells across division stages.
-
-        Returns:
-            Array of distribution values (sums to 1)
-        """
-        distribution = np.zeros(self.max_divisions + 1)
-
-        # Exponential distribution - more stem cells enter at earlier stages
-        for i in range(self.max_divisions + 1):
-            distribution[i] = np.exp(-0.7 * i)
-
-        # Normalize to sum to 1
-        distribution = distribution / np.sum(distribution)
-
-        return distribution
+    # Task 5 (Part C): the senolytic response curves and the stem-cell input
+    # distribution have been removed with the rest of the treatment machinery
+    # (calculate_senolytic_effect, calculate_senolytic_toxicity,
+    # calculate_stem_cell_distribution). The reported six-hour regime is
+    # treatment-free, so these terms were dead and are deleted rather than
+    # zero-weighted.
 
     def calculate_density_factor(self, N_E):
         """
@@ -304,15 +290,17 @@ class PopulationDynamicsModel:
 
     def reduced_rhs(self, state, tau):
         """
-        Right-hand side of the reduced population ODE (eq:reduced, main.tex),
-        valid in the parallel-plate, six-hour, treatment-free regime where
-        d_E = d_S = gamma_S = alpha = 0:
+        Right-hand side of the reduced population ODE (eq:reduced, main.tex) in
+        the parallel-plate, six-hour, treatment-free regime (Task 5 form: Hill
+        induction, xi removed, structure flags):
 
-            dE_i/dt   = 2 r g(N_E) E_{i-1} - r g(N_E) E_i - gamma_tau(tau)(1+xi i) E_i
-            dS_tel/dt = r g(N_E) E_N
-            dS_str/dt = sum_i gamma_tau(tau)(1+xi i) E_i
+            dE_i/dt   = 2 r g E_{i-1} - r g E_i - gamma(tau) E_i   (replicative arm)
+            dS_tel/dt = r g E_N
+            dS_str/dt = sum_i gamma(tau) E_i = gamma(tau) N_E
 
-        Units are the paper's: rates in h^-1, tau in Pa.
+        with g == 1 unless MODEL_GROWTH_TO_CONFLUENCE, and the ladder + S_tel
+        present only when INCLUDE_REPLICATIVE_ARM. Units are the paper's: rates in
+        h^-1, tau in Pa.
 
         Parameters:
             state: array-like [E_0, ..., E_N, S_tel, S_str] (length N+3)
@@ -322,12 +310,15 @@ class PopulationDynamicsModel:
             numpy array of time derivatives, same layout as `state`.
         """
         # Delegate to the standalone numpy-only kernel (see population_reduced_rhs).
-        # Source: Table 1, main.tex — r, K, xi, gamma_min, alpha_gamma, tau_opt
+        gamma_d = self.gamma_d if self.include_supraphysiological_arm else 0.0
         return population_reduced_rhs(
             state, tau,
-            r=self.r, K=self.K, xi=self.xi,
-            gamma_min=self.gamma_min, alpha_gamma=self.alpha_gamma,
-            tau_opt=self.tau_opt, N=self.max_divisions,
+            r=self.r, K=self.K,
+            gamma_min=self.gamma_min, gamma_max=self.gamma_max,
+            tau_h=self.tau_h_sen, n=self.n_hill, N=self.max_divisions,
+            include_replicative=self.include_replicative_arm,
+            model_growth=self.model_growth_to_confluence,
+            gamma_d=gamma_d, tau_d=self.tau_d, m=self.m_hill,
         )
 
     def calculate_division_capacity(self, division_stage):
@@ -349,99 +340,70 @@ class PopulationDynamicsModel:
 
     def update(self, dt, tau, stem_cell_rate=None):
         """
-        Update the population state for one time step.
+        Advance the population state by one explicit-Euler step (legacy /
+        per-cell-sync path).
+
+        Task 5 (Part C) pruned this to the treatment-free reduced law: no death,
+        no SASP, no senolytics, no stem-cell input, no per-stage age modulation
+        and no xi stage weighting. The senescence-induction rate is the SAME Hill
+        law used by the reduced kernel and the MPC rollout
+        (calculate_shear_stress_effect -> gamma_tau_hill). Division terms are
+        active only when the replicative arm is enabled; the contact-inhibition
+        density factor is active only when growth-to-confluence is modelled.
+
+            dE_i/dt   = 2 r g E_{i-1} - r g E_i - gamma(tau) E_i   (replicative arm)
+            dS_tel/dt = r g E_N
+            dS_str/dt = sum_i gamma(tau) E_i
 
         Parameters:
-            dt: Time step
-            tau: Shear stress value (Pa)
-            stem_cell_rate: Optional stem cell input rate, uses 0 if None
+            dt: time step (h). dt == 0 performs a pure state<-cell-count sync.
+            tau: shear stress value (Pa).
+            stem_cell_rate: accepted for API compatibility; ignored (no stem input).
 
         Returns:
-            Updated state
+            Updated state dict.
         """
-        # Use default stem cell rate of 0 if none provided
-        if stem_cell_rate is None:
-            stem_cell_rate = 0
-
         # Get current state variables
         E = self.state['E'].copy()
         S_tel = self.state['S_tel']
         S_stress = self.state['S_stress']
 
-        # Calculate total cells for density factor
-        totals = self.calculate_total_cells()
-        total_cells = totals['total']
-        E_total = totals['E_total']  # N_E (healthy count) used by eq:density
-        S_total = totals['S_total']
-
-        # Calculate regulatory factors
-        # eq:density, main.tex — density factor is a function of the healthy count N_E
-        density_factor = self.calculate_density_factor(E_total)
-        gamma_tau = self.calculate_shear_stress_effect(tau)
-        senolytic_effect_tel = self.calculate_senolytic_effect(self.senolytic_conc, self.sen_efficacy_tel)
-        senolytic_effect_stress = self.calculate_senolytic_effect(self.senolytic_conc, self.sen_efficacy_stress)
-        senolytic_toxicity = self.calculate_senolytic_toxicity(self.senolytic_conc)
-        stem_cell_distribution = self.calculate_stem_cell_distribution()
+        E_total = sum(E)  # N_E (healthy count) used by the density factor
+        # Density factor g(N_E) only when growth-to-confluence is modelled; else 1.
+        g = (self.calculate_density_factor(E_total)
+             if self.model_growth_to_confluence else 1.0)
+        gamma_tau = self.calculate_shear_stress_effect(tau)  # shared Hill law
 
         # Initialize arrays for new state
         E_new = [0] * (self.max_divisions + 1)
-        S_tel_new = 0
-        S_stress_new = 0
+        S_tel_new = 0.0
+        S_stress_new = 0.0
 
-        # Update each division stage
+        # Update each division stage (xi removed: stage-independent senescence).
         for i in range(self.max_divisions + 1):
-            # Age-dependent death rate + senolytic toxicity
-            age_sensitivity_factor = 1.0 + 0.08 * i
-            death_rate = self.d_E * (1 + 0.03 * i) + senolytic_toxicity * age_sensitivity_factor
+            stress_senescence_term = gamma_tau * E[i]
 
-            # Stress-induced senescence rate, eq:Ei/eq:reduced — gamma_tau(tau)*(1 + xi*i)
-            # Source: Table 1, main.tex — xi = 0.05 per stage
-            stress_senescence_rate = gamma_tau * (1 + self.xi * i)
-
-            # Senescence induction by SASP
-            sasp_senescence_rate = self.gamma_S * S_total
-
-            # Calculate division terms for this stage (eq:Ei, main.tex):
-            #   division in  = 2 * r * g(N_E) * E_{i-1}
-            #   division out =     r * g(N_E) * E_i
-            # The previous implementation multiplied these by a division_capacity(i)
-            # ramp that does not appear in eq:Ei; it has been removed.
-            if i == 0:
-                # First group (E_0) - undivided cells
-                division_out = self.r * E[i] * density_factor
-                division_in = 0
+            # Division terms (eq:Ei): active only with the replicative arm.
+            if self.include_replicative_arm:
+                division_out = self.r * g * E[i]
+                division_in = 0.0 if i == 0 else 2 * self.r * g * E[i - 1]
             else:
-                # Middle and terminal groups
-                division_in = 2 * self.r * E[i - 1] * density_factor
-                division_out = self.r * E[i] * density_factor
+                division_out = 0.0
+                division_in = 0.0
 
-            # Cell loss terms
-            death_term = death_rate * E[i]
-            stress_senescence_term = stress_senescence_rate * E[i]
-            sasp_senescence_term = sasp_senescence_rate * E[i]
-
-            # Stem cell input
-            stem_cell_input = stem_cell_rate * stem_cell_distribution[i]
-
-            # Combine all terms
             if i == self.max_divisions:
-                # Last division stage - all divisions lead to telomere-induced senescence
-                E_new[i] = E[i] + dt * (division_in - death_term - stress_senescence_term -
-                                        sasp_senescence_term - division_out + stem_cell_input)
-
-                # Add contribution to telomere-induced senescence
+                # Terminal stage: divisions lead to telomere-induced senescence.
+                E_new[i] = E[i] + dt * (division_in - division_out - stress_senescence_term)
                 S_tel_new += dt * division_out
             else:
-                E_new[i] = E[i] + dt * (division_in - division_out - death_term -
-                                        stress_senescence_term - sasp_senescence_term +
-                                        stem_cell_input)
+                E_new[i] = E[i] + dt * (division_in - division_out - stress_senescence_term)
 
-            # Add contributions to stress-induced senescence
-            S_stress_new += dt * (stress_senescence_term + sasp_senescence_term)
+            # Stress-induced senescence accumulation.
+            S_stress_new += dt * stress_senescence_term
 
-        # Update senescent cell populations
-        S_tel_new += S_tel + dt * (-(self.d_S_tel + senolytic_effect_tel) * S_tel)
-        S_stress_new += S_stress + dt * (-(self.d_S_stress + senolytic_effect_stress) * S_stress)
+        # Carry senescent compartments forward (no death, no senolytic clearance).
+        S_tel_new += S_tel
+        S_stress_new += S_stress
 
         # Ensure non-negative values
         E_new = [max(0, e) for e in E_new]

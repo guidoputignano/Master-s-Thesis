@@ -70,9 +70,9 @@ varphi_bar(k)   : population mean flow-alignment angle at each boundary, reporte
                   in degrees. Zero denotes perfect alignment with the flow.
 terminal values : the value of phi_sen, rho_bar, and varphi_bar at t = NUM_STEPS.
 J               : the realised closed-loop cost, evaluated with the controller's
-                  own stage weights on the applied trajectory,
-                  J = sum_k [ w_phi * phi_sen(k)^2
-                            + w_rho * (rho_bar(k) - rho_flow)^2
+                  own stage weights on the applied trajectory (Task 5, Part A: no
+                  soft senescence term; senescence is a hard constraint),
+                  J = sum_k [ w_rho * (rho_bar(k) - rho_flow)^2
                             + w_varphi * varphi_bar(k)^2
                             + w_u * (tau(k) - tau(k-1))^2 ],
                   summed over the applied intervals k = 1..NUM_STEPS, with
@@ -223,10 +223,13 @@ def run_closed_loop(config, n_prediction, n_control, n_steps, seed):
     varphi = np.asarray(varphi_seq)
 
     # Realised closed-loop cost with the controller's own stage weights.
+    # Task 5 (Part A): the cost no longer contains a soft senescence term
+    # (w_phi * phi_sen^2); senescence is a hard constraint. The realised cost is
+    # therefore tracking (aspect ratio + flow-alignment angle) plus the move
+    # regularizer only.
     tau_prev = np.concatenate([[0.0], tau[:-1]])
     J = float(np.sum(
-        mpc.w_phi * phi[1:] ** 2
-        + mpc.w_rho * (rho[1:] - RHO_FLOW) ** 2
+        mpc.w_rho * (rho[1:] - RHO_FLOW) ** 2
         + mpc.w_varphi * varphi[1:] ** 2
         + mpc.w_u * (tau - tau_prev) ** 2))
 

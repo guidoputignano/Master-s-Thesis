@@ -1,18 +1,25 @@
 """
-Part D - Sensitivity of the MPC cost weights (w_phi : w_rho : w_varphi : w_u).
+Part D - Sensitivity of the MPC cost weights (w_rho : w_varphi : w_u).
+
+NOTE (Task 5 refactor): the controller cost no longer contains a soft senescence
+term. Senescence is now enforced as a HARD constraint phi_sen(k) <= 0.30, so the
+weight ``w_phi`` was removed from ``RecedingHorizonMPC`` and from this sweep. This
+script has been updated only enough to keep running against the new constructor
+(the w_phi weight sets are gone); the surviving weights and outcomes are otherwise
+as before. The induction law is also now the monotone Hill form; this script was
+not re-derived around it.
 
 The receding-horizon controller (main.tex, eq:ocp / eq:stagecost) chooses the
 wall-shear protocol tau(t) by minimising
 
-    J = w_phi    * sum_k phi_sen(k)^2
-      + w_rho    * sum_k (rho_bar(k)   - 2.3)^2
+    J = w_rho    * sum_k (rho_bar(k)   - 2.3)^2
       + w_varphi * sum_k (varphi_bar(k) - 0.0)^2
       + w_u      * sum_k (tau(k) - tau(k-1))^2
 
-subject to phi_sen(k) <= 0.30 and 0 <= tau(k) <= 2 Pa. The nominal weights are
-10 / 1 / 5 / 0.1. Unlike the morphological energy weights (Part C), these enter
-the control law directly, so this part quantifies how the *protocol* and the
-*closed-loop outcome* depend on them.
+subject to phi_sen(k) <= 0.30, 0 <= tau(k) <= 2 Pa and a hard move bound. The
+nominal weights are 1 / 5 / 0.1. Unlike the morphological energy weights
+(Part C), these enter the control law directly, so this part quantifies how the
+*protocol* and the *closed-loop outcome* depend on them.
 
 For each weight set the receding-horizon loop is run on the reduced prediction
 model only (no tessellation rendering): population compartments via solve_ivp
@@ -49,8 +56,9 @@ SINGLE = 8.5 * CM
 DOUBLE = 17.5 * CM
 FIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "figures")
 
-# Nominal MPC cost weights (Source: project spec / main.tex eq:stagecost)
-NOMINAL = {"w_phi": 10.0, "w_rho": 1.0, "w_varphi": 5.0, "w_u": 0.1}
+# Nominal MPC cost weights (Source: project spec / main.tex eq:stagecost).
+# w_phi removed (Task 5): senescence is a hard constraint, not a soft penalty.
+NOMINAL = {"w_rho": 1.0, "w_varphi": 5.0, "w_u": 0.1}
 N_STEPS = 24            # 24 h conditioning (matches run_mpc.py)
 
 
@@ -113,11 +121,10 @@ def run_protocol(cfg, weights, n_steps=N_STEPS):
     }
 
 
-# Weight sets: nominal plus factor-of-2 perturbations of each cost weight
+# Weight sets: nominal plus factor-of-2 perturbations of each cost weight.
+# (w_phi sets removed: senescence is a hard constraint after the Task 5 refactor.)
 WEIGHT_SETS = {
     "nominal":      dict(NOMINAL),
-    "w_phi x0.5":   {**NOMINAL, "w_phi": 5.0},
-    "w_phi x2":     {**NOMINAL, "w_phi": 20.0},
     "w_rho x0.5":   {**NOMINAL, "w_rho": 0.5},
     "w_rho x2":     {**NOMINAL, "w_rho": 2.0},
     "w_varphi x0.5": {**NOMINAL, "w_varphi": 2.5},

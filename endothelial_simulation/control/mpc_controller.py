@@ -659,12 +659,16 @@ class RecedingHorizonMPC:
     -----------------------
     Decision variable:  tau(k) in [0, 2] Pa on a 1 h control grid.
     Prediction horizon: N_p steps;  control horizon: N_c steps (blocked input).
-    Cost (per spec):
-        J = w_phi    * sum_k phi_sen(k)^2
-          + w_rho    * sum_k (rho_bar(k)   - 2.3)^2
+    Cost (Task 5, Part A — tracking of aspect ratio and flow-alignment angle
+    plus a move regularizer; senescence is enforced as a hard constraint, NOT a
+    soft penalty, so there is no w_phi term):
+        J = w_rho    * sum_k (rho_bar(k)    - 2.3)^2
           + w_varphi * sum_k (varphi_bar(k) - 0.0)^2
           + w_u      * sum_k (tau(k) - tau(k-1))^2
-    Hard constraints:  phi_sen(k) <= 0.30 ;  0 <= tau(k) <= 2.
+    Hard constraints:
+        phi_sen(k) <= 0.30                     (senescent-fraction cap)
+        0 <= tau(k) <= 2                       (magnitude bounds)
+        |tau(k) - tau(k-1)| <= delta_tau_max   (single move / slew bound)
     Solved by constrained SLSQP; only the first move is applied (receding
     horizon).
 
@@ -723,12 +727,17 @@ class RecedingHorizonMPC:
     -----------------------------------------------------------------
     The senescent fraction is governed by the reduced population ODE system
     ``population_reduced_rhs`` (eq:reduced), integrated over each control
-    interval with scipy.integrate.solve_ivp (RK45):
-        dE_i/dt   = 2 r g(N_E) E_{i-1} - r g(N_E) E_i - gamma_tau(tau)(1+xi i) E_i
-        dS_tel/dt = r g(N_E) E_N
-        dS_str/dt = sum_i gamma_tau(tau)(1+xi i) E_i
-        g(N_E)    = 1/(1 + N_E/K)                            (contact inhibition)
-        gamma_tau = gamma_min + alpha_gamma (tau - tau_opt)^2 (U-shaped induction)
+    interval with scipy.integrate.solve_ivp (RK45). After the Task 5 refactor the
+    induction rate is the monotone-decreasing Hill law and xi is removed:
+        dE_i/dt   = 2 r g E_{i-1} - r g E_i - gamma(tau) E_i
+        dS_tel/dt = r g E_N
+        dS_str/dt = sum_i gamma(tau) E_i = gamma(tau) N_E
+        g         = 1/(1 + N_E/K) if MODEL_GROWTH_TO_CONFLUENCE else 1
+        gamma(tau)= gamma_min + (gamma_max - gamma_min) tau_h^n/(tau_h^n + tau^n)
+                    (monotone shear protection; Hill FORM is a modelling choice
+                     matched to the cited shape, NOT a fitted law)
+    The ladder E_0..E_N and S_tel are present only when INCLUDE_REPLICATIVE_ARM.
+    This gamma is IDENTICAL to the one used in the per-cell population update.
     phi_sen = (S_tel + S_str) / (N_E + S_tel + S_str). The per-cell
     ``stress_exposure_time`` clock of the legacy model plays NO role here; in the
     closed loop the ODE compartment counts are mapped back onto individual cells
@@ -743,15 +752,21 @@ class RecedingHorizonMPC:
 
     def __init__(self, config,
                  dt_h=1.0, n_prediction=6, n_control=3,
-                 tau_bounds=(0.0, 2.0), phi_sen_max=0.30,
-                 w_phi=10.0, w_rho=1.0, w_varphi=5.0, w_u=0.1):
+                 tau_bounds=(0.0, 2.0), phi_sen_max=0.30, delta_tau_max=0.5,
+                 w_rho=1.0, w_varphi=5.0, w_u=0.1):
         self.config = config
         self.dt_h = dt_h
         self.Np = n_prediction
         self.Nc = n_control
         self.tau_min, self.tau_max = tau_bounds
         self.phi_sen_max = phi_sen_max
-        self.w_phi, self.w_rho, self.w_varphi, self.w_u = w_phi, w_rho, w_varphi, w_u
+        # Single hard move / slew bound |tau(k)-tau(k-1)| <= delta_tau_max (Pa per
+        # control interval). This is a CONTROL-design parameter (not a Table-1
+        # biological value); the default throttles the transient approach to
+        # saturation. Widen it (e.g. to tau_max) to recover the unconstrained move.
+        self.delta_tau_max = delta_tau_max
+        # No w_phi: senescence is a hard constraint, not a soft penalty (Part A).
+        self.w_rho, self.w_varphi, self.w_u = w_rho, w_varphi, w_u
 
         # Model parameters (Table 1, main.tex) read from config
         self.N = config.max_divisions
@@ -762,10 +777,19 @@ class RecedingHorizonMPC:
         # area = (650 um)^2 = (0.065 cm)^2 = 4.225e-3 cm^2.
         area_cm2 = (getattr(config, 'imaging_field_um', 650.0) / 1.0e4) ** 2
         self.K = config.carrying_capacity * area_cm2   # Source: Table 1, K=5.5e4 cells/cm^2
-        self.xi = config.xi
-        self.gamma_min = config.gamma_min
-        self.alpha_gamma = config.alpha_gamma
-        self.tau_opt = config.tau_opt
+        # Senescence-induction Hill law (identical to the population update); the
+        # Hill FORM is a modelling choice, not a fitted law (see gamma_tau_hill).
+        self.gamma_min = config.gamma_min                        # h^-1 [anchored]
+        self.gamma_max = config.gamma_max                        # h^-1 [assumed, sweepable]
+        self.tau_h_sen = config.tau_h_sen                        # Pa   [anchored]
+        self.n_hill = config.n_hill                              # -    [fixed shape]
+        self.gamma_d = getattr(config, 'gamma_d', 0.0125)        # h^-1 [assumed, sweepable]
+        self.tau_d = getattr(config, 'tau_d', 7.0)               # Pa   [assumed]
+        self.m_hill = getattr(config, 'm_hill', 2)               # -    [fixed shape]
+        # Structure flags (default to the reported structure).
+        self.include_replicative_arm = getattr(config, 'INCLUDE_REPLICATIVE_ARM', True)
+        self.model_growth_to_confluence = getattr(config, 'MODEL_GROWTH_TO_CONFLUENCE', False)
+        self.include_supraphysiological_arm = getattr(config, 'INCLUDE_SUPRAPHYSIOLOGICAL_ARM', False)
         self.tau_act = config.tau_act
         # ASPECT-RATIO (rho) relaxation constant only; 7.4 h, equal to tau_orient
         # (one physical morphological constant). Cell AREA is fixed by the Voronoi
@@ -825,10 +849,14 @@ class RecedingHorizonMPC:
         pop, rho_h, theta_h = state['pop'], state['rho_h'], state['theta_h']
 
         # Population compartments: integrate eq:reduced with solve_ivp / RK45.
+        gamma_d = self.gamma_d if self.include_supraphysiological_arm else 0.0
         sol = solve_ivp(
             lambda t, y: population_reduced_rhs(
-                y, tau, self.r, self.K, self.xi,
-                self.gamma_min, self.alpha_gamma, self.tau_opt, self.N),
+                y, tau, self.r, self.K,
+                self.gamma_min, self.gamma_max, self.tau_h_sen, self.n_hill, self.N,
+                include_replicative=self.include_replicative_arm,
+                model_growth=self.model_growth_to_confluence,
+                gamma_d=gamma_d, tau_d=self.tau_d, m=self.m_hill),
             (0.0, dt), pop, method='RK45', rtol=1e-6, atol=1e-9)
         pop_new = np.clip(sol.y[:, -1], 0.0, None)
 
@@ -874,12 +902,13 @@ class RecedingHorizonMPC:
         return traj
 
     def cost(self, u_seq, x0, u_prev):
+        # Part A cost: track aspect ratio + flow-alignment angle, plus a move
+        # regularizer. Senescence is NOT penalised here (hard constraint only).
         traj = self._rollout(u_seq, x0)   # list of (tau, (phi_sen, rho_bar, varphi_bar))
         J = 0.0
         prev = u_prev
-        for tau, (phi_sen, rho_bar, varphi_bar) in traj:
-            J += (self.w_phi * phi_sen ** 2
-                  + self.w_rho * (rho_bar - RHO_FLOW) ** 2
+        for tau, (_phi_sen, rho_bar, varphi_bar) in traj:
+            J += (self.w_rho * (rho_bar - RHO_FLOW) ** 2
                   + self.w_varphi * (varphi_bar - 0.0) ** 2
                   + self.w_u * (tau - prev) ** 2)
             prev = tau
@@ -890,19 +919,60 @@ class RecedingHorizonMPC:
         traj = self._rollout(u_seq, x0)
         return np.array([self.phi_sen_max - out[0] for _, out in traj])
 
+    def _move_margin(self, u_seq, u_prev):
+        """Constraint vector: delta_tau_max - |tau(k) - tau(k-1)| >= 0 over Nc.
+
+        The blocked tail (Np - Nc) holds the last move constant, so the move bound
+        only needs to be enforced across the Nc free moves (including the first
+        move away from u_prev).
+        """
+        u = np.asarray(u_seq)
+        prev = np.concatenate(([u_prev], u[:-1]))
+        return self.delta_tau_max - np.abs(u - prev)
+
     def solve(self, x0, u_prev):
-        """Solve the OCP (eq:ocp) and return the full optimal control horizon."""
-        u0 = np.full(self.Nc, np.clip(u_prev, self.tau_min, self.tau_max))
+        """Solve the OCP (eq:ocp) and return the full optimal control horizon.
+
+        SLSQP is multi-started from a fixed, DETERMINISTIC set of initial guesses
+        spanning the input range. This is required because the morphological
+        targets are FLAT below the activation threshold (the gate s(tau)=0 for
+        tau <= tau_act): with senescence enforced as a hard constraint rather than
+        a soft penalty (Part A), a single start placed in that dead zone — e.g. at
+        u_prev = 0 — sees a zero cost gradient and would not move. The multi-start
+        can only improve on any single start, so it does not perturb the optimum
+        where the gradient is already informative, and it introduces no
+        randomness (the seed set is fixed).
+        """
         bounds = [(self.tau_min, self.tau_max)] * self.Nc
-        constraints = [{
-            'type': 'ineq',
-            'fun': lambda u, x0=x0: self._phi_sen_margin(u, x0)
-        }]
-        res = minimize(self.cost, u0, args=(x0, u_prev), method='SLSQP',
-                       bounds=bounds, constraints=constraints,
-                       options={'maxiter': 200, 'ftol': 1e-8})
-        u_opt = res.x if res.success else u0
-        return np.asarray(u_opt), res
+        constraints = [
+            {'type': 'ineq', 'fun': lambda u, x0=x0: self._phi_sen_margin(u, x0)},
+            {'type': 'ineq', 'fun': lambda u, up=u_prev: self._move_margin(u, up)},
+        ]
+        # Deterministic seeds: previous move, just inside the gate-open region,
+        # mid-range, and both bounds. Sorted+deduplicated for stable ordering.
+        u_prev_c = float(np.clip(u_prev, self.tau_min, self.tau_max))
+        seeds = sorted({
+            u_prev_c,
+            float(np.clip(self.tau_act * 1.05, self.tau_min, self.tau_max)),
+            0.5 * (self.tau_min + self.tau_max),
+            self.tau_min,
+            self.tau_max,
+        })
+        best_u, best_res, best_score = None, None, np.inf
+        for s in seeds:
+            u0 = np.full(self.Nc, s)
+            res = minimize(self.cost, u0, args=(x0, u_prev), method='SLSQP',
+                           bounds=bounds, constraints=constraints,
+                           options={'maxiter': 200, 'ftol': 1e-8})
+            u = res.x if res.success else u0
+            feasible = (np.all(self._phi_sen_margin(u, x0) >= -1e-6)
+                        and np.all(self._move_margin(u, u_prev) >= -1e-6))
+            # Rank feasible solutions by cost; infeasible ones are heavily
+            # penalised so a feasible solution always wins when one exists.
+            score = self.cost(u, x0, u_prev) + (0.0 if feasible else 1e6)
+            if score < best_score:
+                best_score, best_u, best_res = score, np.asarray(u), res
+        return best_u, best_res
 
 
 # =============================================================================
