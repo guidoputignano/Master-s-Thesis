@@ -145,10 +145,17 @@ class SimulationConfig:
         #          at rate r. NOTE: dropping g CHANGES simulation output relative
         #          to g-on (proliferation is no longer slowed by density); r is
         #          left at its Table-1 value (the folded constant defaults to 1).
-        self.INCLUDE_SUPRAPHYSIOLOGICAL_ARM = False
+        self.INCLUDE_SUPRAPHYSIOLOGICAL_ARM = True
         #   True : add the high-shear damage term gamma_d*tau^m/(tau_d^m+tau^m)
         #          to the induction rate (see gamma_d/tau_d/m_hill below).
         #   False: no supraphysiological damage arm.
+        # NOW ON (author decision): the protective-only monotone Hill makes the
+        # control problem trivial (higher shear improves morphology AND lowers
+        # senescence, so the optimiser just saturates the shear ceiling and the
+        # phi_sen<=0.30 constraint is never active). Re-introducing the VAD-relevant
+        # supraphysiological injury arm makes senescence rise again toward the
+        # ceiling, so the controller must trade morphology against the senescence
+        # limit and the constraint becomes active. See main.tex Sec 2.3 / 3.4.
 
         # === SENESCENCE-INDUCTION RATE gamma(tau): monotone-decreasing Hill ===
         # Replaces the earlier symmetric quadratic (eq:gamma_quad). Low shear
@@ -175,10 +182,16 @@ class SimulationConfig:
         #                                 can sweep them independently (cf. tau_adapt/tau_orient).
         self.n_hill = 2            # -    [fixed]    protective Hill exponent (shape constant,
         #                                 plausible 2-4); fixed at 2, NOT fitted.
-        # Optional supraphysiological (high-shear) damage arm, active only when
-        # INCLUDE_SUPRAPHYSIOLOGICAL_ARM is True: + gamma_d*tau^m/(tau_d^m+tau^m)
-        self.gamma_d = 0.0125      # h^-1 [assumed]  high-shear damage plateau; sweepable.
-        self.tau_d = 7.0           # Pa   [assumed]  damage half-max shear (supraphysiological ~5-10 Pa).
+        # Supraphysiological (high-shear) damage arm (ON, see INCLUDE_ flag above):
+        # gamma(tau) += gamma_d * tau^m / (tau_d^m + tau^m). Rises with shear, so
+        # senescence is minimised at moderate laminar shear and grows again toward
+        # the VAD-relevant supraphysiological ceiling.
+        self.gamma_d = 0.05        # h^-1 [assumed]  high-shear damage plateau; illustrative,
+        #                                 sweepable (like gamma_max); NOT fitted. Chosen so the
+        #                                 phi_sen<=0.30 constraint is active over the 6 h window.
+        self.tau_d = 1.5           # Pa   [assumed]  damage half-max shear, just above the ~1.4 Pa
+        #                                 physiological optimum (injury onset in the achievable
+        #                                 [0,2] Pa VAD band). Sweepable; NOT fitted.
         self.m_hill = 2            # -    [fixed]    damage Hill exponent (plausible 2-4); fixed at 2.
 
         self.phi_sen_max = 0.30    # -    Source: Table 1, main.tex — phi_sen^max = 30% of population
