@@ -41,9 +41,14 @@ class SimulationConfig:
         # === INITIAL SENESCENCE COMPOSITION (passage 6 HUVEC, PDL 15) ===
         # Source: NMR senescence literature (project knowledge) — phi_sen(0) = 0.20 at PDL 15
         self.initial_senescent_fraction = 0.20   # phi_sen(0) = 20%
-        # Of the senescent fraction: 70% stress-induced (S_str), 30% telomere-induced (S_tel)
-        self.senescent_stress_fraction = 0.70    # Source: project spec — S_str share of senescent
-        self.senescent_telomere_fraction = 0.30  # Source: project spec — S_tel share of senescent
+        # Telomere-induced (replicative) senescence is REMOVED from the reported
+        # reduced model (main.tex Sec 2.3): the initial senescent pool is entirely
+        # stress-induced (S_str), and phi_sen = S_str / N_tot. Cell division is
+        # kept (r, K active), so INCLUDE_REPLICATIVE_ARM stays True for the ladder;
+        # with a zero telomere fraction and no cells at the Hayflick limit, S_tel
+        # remains ~0 throughout.
+        self.senescent_stress_fraction = 1.0     # all initial senescence is stress-induced
+        self.senescent_telomere_fraction = 0.0   # telomere senescence removed (see Sec 2.3)
 
         # === EVENT-DRIVEN SYSTEM (MAIN FEATURE) ===
         self.use_event_driven_system = False  # Always enabled

@@ -43,8 +43,12 @@ class SpatialPropertiesModel:
 
         # Physical cell areas in um^2 (Table 1, main.tex), converted to comp pixels.
         area_healthy_comp = _um2_to_comp(2354.0)   # Source: Table 1, main.tex — A_E* (healthy HUVEC) = 2354 um^2
-        area_sen_small_comp = _um2_to_comp(2207.0)  # Source: Table 1, main.tex — small senescent area = 2207 um^2
-        area_sen_large_comp = _um2_to_comp(8626.0)  # Source: Table 1, main.tex — large senescent area = 8626 um^2
+        # Senescent cells are enlarged; A_S = 5000-8600 um^2 (Table 1, main.tex).
+        # Use the range endpoints for the small/large senescent sizes so both are
+        # clearly larger than the healthy area (the previous 2207 um^2 "small" value
+        # was below healthy and inconsistent with the paper).
+        area_sen_small_comp = _um2_to_comp(5000.0)  # Source: Table 1, main.tex — A_S lower bound = 5000 um^2
+        area_sen_large_comp = _um2_to_comp(8600.0)  # Source: Table 1, main.tex — A_S upper bound = 8600 um^2
 
         # Control (healthy) cell parameters at different pressures.
         # Area is the healthy HUVEC target at every shear level (Table 1, main.tex — A_E* = 2354 um^2).
@@ -70,8 +74,8 @@ class SpatialPropertiesModel:
 
         # Senescent cell parameters (areas converted from um^2 to comp pixels).
         self.senescent_params = {
-            'area_small': area_sen_small_comp,   # Source: Table 1, main.tex — small senescent area = 2207 um^2
-            'area_large': area_sen_large_comp,   # Source: Table 1, main.tex — large senescent area = 8626 um^2
+            'area_small': area_sen_small_comp,   # Source: Table 1, main.tex — A_S lower bound = 5000 um^2
+            'area_large': area_sen_large_comp,   # Source: Table 1, main.tex — A_S upper bound = 8600 um^2
             'aspect_ratio': {
                 0.0: 1.9,            # Static senescent
                 1.4: 2.0,            # Flow senescent (no significant change)
