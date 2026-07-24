@@ -8,19 +8,22 @@ side is provided by the corrected
 ``endothelial_simulation.models.PopulationDynamicsModel.reduced_rhs``, which
 implements
 
-    dE_i/dt   = 2 r g(N_E) E_{i-1} - r g(N_E) E_i - gamma_tau(tau)(1+xi i) E_i
-    dS_tel/dt = r g(N_E) E_N
-    dS_str/dt = sum_i gamma_tau(tau)(1+xi i) E_i
+    dE_i/dt   = 2 r g(N_E) E_{i-1} - r g(N_E) E_i - gamma(tau) E_i
+    dS_str/dt = sum_i gamma(tau) E_i = gamma(tau) N_E
 
-with g(N_E) = 1/(1 + N_E/K)               (eq:density)
-and gamma_tau(tau) = gamma_min + alpha_gamma (tau - tau_opt)^2  (eq:gamma_quad).
+with g(N_E) = 1/(1 + N_E/K)               (eq:density) and the biphasic Hill law
+    gamma(tau) = gamma_min + (gamma_max - gamma_min) tau_h^n/(tau_h^n + tau^n)
+                           + gamma_d tau^m/(tau_d^m + tau^m)        (eq:gamma_hill)
+(protective Hill + supraphysiological injury Hill).
 
 Uncertain parameters and ranges (Table 1, main.tex):
     gamma_min   : +/-30% around 0.00278 h^-1
-    alpha_gamma : +/-30% around 0.00497 Pa^-2 h^-1
+    gamma_max   : +/-30% around 0.0125  h^-1
+    tau_h       : +/-30% around 0.5     Pa
+    gamma_d     : +/-30% around 0.05    h^-1  (supraphysiological injury)
+    tau_d       : +/-30% around 1.5     Pa    (supraphysiological injury)
     r           : uniform [0.02, 0.03] h^-1
     K           : uniform [5e4, 6e4] cells/cm^2
-    xi          : uniform [0.025, 0.075] per stage
 
 Sampling: N = 2000 base samples via the Saltelli design (the sampling required
 to estimate Sobol indices with SALib). First-order Sobol indices are computed
@@ -87,24 +90,33 @@ def set_style():
 # ----------------------------------------------------------------------------
 # Problem definition (Table 1 ranges)
 # ----------------------------------------------------------------------------
+# Biphasic Hill senescence law (Task 5 + injury arm): sample the identified
+# induction parameters {gamma_min, gamma_max, tau_h} and the supraphysiological
+# injury parameters {gamma_d, tau_d}, plus the population kinetics {r, K}. The
+# retired quadratic parameters (alpha_gamma, xi) were removed with the quadratic
+# law and are no longer sampled.
 PROBLEM = {
-    "num_vars": 5,
-    "names": ["gamma_min", "alpha_gamma", "r", "K", "xi"],
+    "num_vars": 7,
+    "names": ["gamma_min", "gamma_max", "tau_h", "gamma_d", "tau_d", "r", "K"],
     "bounds": [
         [0.00278 * 0.70, 0.00278 * 1.30],  # gamma_min +/-30%   (Table 1)
-        [0.00497 * 0.70, 0.00497 * 1.30],  # alpha_gamma +/-30% (Table 1)
+        [0.0125 * 0.70, 0.0125 * 1.30],    # gamma_max +/-30%   (Table 1)
+        [0.5 * 0.70, 0.5 * 1.30],          # tau_h    +/-30%    (Table 1)
+        [0.05 * 0.70, 0.05 * 1.30],        # gamma_d  +/-30%    (Table 1, injury)
+        [1.5 * 0.70, 1.5 * 1.30],          # tau_d    +/-30%    (Table 1, injury)
         [0.02, 0.03],                       # r          (Table 1)
         [5.0e4, 6.0e4],                     # K          (Table 1)
-        [0.025, 0.075],                     # xi         (Table 1)
     ],
 }
 
 _PRETTY = {
     "gamma_min": r"$\gamma_{\min}$",
-    "alpha_gamma": r"$\alpha_{\gamma}$",
+    "gamma_max": r"$\gamma_{\max}$",
+    "tau_h": r"$\tau_h$",
+    "gamma_d": r"$\gamma_d$",
+    "tau_d": r"$\tau_d$",
     "r": r"$r$",
     "K": r"$K$",
-    "xi": r"$\xi$",
 }
 
 # A single reusable model instance; per-sample parameters are overwritten.
@@ -119,14 +131,16 @@ def evaluate(sample):
     Integrate the reduced population ODE for one parameter sample and return
     phi_sen(6h).
 
-    sample order: [gamma_min, alpha_gamma, r, K, xi]
+    sample order: [gamma_min, gamma_max, tau_h, gamma_d, tau_d, r, K]
     """
-    gamma_min, alpha_gamma, r, K, xi = sample
+    gamma_min, gamma_max, tau_h, gamma_d, tau_d, r, K = sample
     _MODEL.gamma_min = gamma_min
-    _MODEL.alpha_gamma = alpha_gamma
+    _MODEL.gamma_max = gamma_max
+    _MODEL.tau_h_sen = tau_h
+    _MODEL.gamma_d = gamma_d
+    _MODEL.tau_d = tau_d
     _MODEL.r = r
     _MODEL.K = K
-    _MODEL.xi = xi
 
     y0 = np.zeros(_NSTAGE + 2)
     y0[0] = N0  # all healthy cells start at division stage 0

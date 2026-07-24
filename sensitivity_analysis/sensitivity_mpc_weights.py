@@ -59,7 +59,9 @@ FIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "figures")
 # Nominal MPC cost weights (Source: project spec / main.tex eq:stagecost).
 # w_phi removed (Task 5): senescence is a hard constraint, not a soft penalty.
 NOMINAL = {"w_rho": 1.0, "w_varphi": 5.0, "w_u": 0.1}
-N_STEPS = 24            # 24 h conditioning (matches run_mpc.py)
+N_STEPS = 6             # 6 h window (the biphasic injury arm makes phi_sen
+#                        infeasible beyond ~8 h, so the constraint-active study
+#                        is run over the six-hour regime; matches run_mpc 6 h).
 
 
 def set_style():
@@ -179,7 +181,9 @@ def _outcomes_plot(results, fname):
 
 def _sensitivity_bar(sens, fname):
     keys = list(NOMINAL.keys())
-    labels = [r"$w_\phi$", r"$w_\rho$", r"$w_{\bar\varphi}$", r"$w_u$"]
+    # Labels must match NOMINAL's keys (w_phi was removed in Task 5: senescence is
+    # a hard constraint, not a soft cost term).
+    labels = [r"$w_\rho$", r"$w_{\bar\varphi}$", r"$w_u$"]
     colors = {"align_final": "#4C72B0", "phisen_final": "#C44E52", "tau_mean": "#55A868"}
     legend = {"align_final": r"$\bar{\varphi}$", "phisen_final": r"$\phi_{\mathrm{sen}}$",
               "tau_mean": r"$\bar{\tau}$"}
