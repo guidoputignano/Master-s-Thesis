@@ -68,16 +68,22 @@ def test_gamma_unified_update_and_kernel():
     pop[0] = 120.0
     pop[N + 1] = 15.0
 
+    # Include the supraphysiological injury arm in the reference exactly as
+    # calculate_shear_stress_effect does (gated by the config flag), so the
+    # "one gamma everywhere" invariant holds whether or not the arm is active.
+    gd = cfg.gamma_d if getattr(cfg, 'INCLUDE_SUPRAPHYSIOLOGICAL_ARM', False) else 0.0
     for tau in (0.0, 0.25, 0.5, 1.4, 3.0):
         g_ref = gamma_tau_hill(tau, cfg.gamma_min, cfg.gamma_max,
-                               cfg.tau_h_sen, cfg.n_hill)
+                               cfg.tau_h_sen, cfg.n_hill,
+                               gamma_d=gd, tau_d=cfg.tau_d, m=cfg.m_hill)
         # per-cell update path
         assert np.isclose(m.calculate_shear_stress_effect(tau), g_ref, atol=TOL)
         # reduced kernel: dS_str = gamma * N_E (xi removed)
         d = population_reduced_rhs(
             pop, tau, cfg.proliferation_rate, m.K,
             cfg.gamma_min, cfg.gamma_max, cfg.tau_h_sen, cfg.n_hill, N,
-            include_replicative=True, model_growth=False)
+            include_replicative=True, model_growth=False,
+            gamma_d=gd, tau_d=cfg.tau_d, m=cfg.m_hill)
         N_E = float(pop[:N + 1].sum())
         assert np.isclose(d[N + 2] / N_E, g_ref, atol=TOL)
 

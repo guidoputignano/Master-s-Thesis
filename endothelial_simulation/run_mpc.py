@@ -27,10 +27,11 @@ def build_config():
     config = SimulationConfig().set_full_simulation()
     config.enable_holes = False          # Source: spec — holes off for the MPC run
     config.create_animations = False     # MPC frames are rendered by run_mpc_simulation
-    # Initial senescent composition (Table 1 / project knowledge); used by initialize()
+    # Initial senescent composition: telomere senescence removed (main.tex Sec 2.3),
+    # so the initial pool is entirely stress-induced.
     config.initial_senescent_fraction = 0.20
-    config.senescent_stress_fraction = 0.70
-    config.senescent_telomere_fraction = 0.30
+    config.senescent_stress_fraction = 1.0
+    config.senescent_telomere_fraction = 0.0
     return config
 
 
@@ -44,7 +45,7 @@ def main(n_control_steps=24):
     print("Endothelial mechanoadaptation — receding-horizon MPC")
     print(f"  confluent cell count : {config.initial_cell_count}")
     print(f"  phi_sen(0)           : {config.initial_senescent_fraction} "
-          f"(70% stress / 30% telomere)")
+          f"(all stress-induced)")
     print(f"  pixel scale          : {config.pixel_scale_um:.4f} um/px")
     print("=" * 70)
 
