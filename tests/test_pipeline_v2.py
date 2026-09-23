@@ -383,3 +383,34 @@ def test_render_keeps_full_crop_at_border():
     im = np.asarray(bv.render(rgb, mask, 0.429, size=100))
     left = im[:, :100]
     assert (left.reshape(-1, 3) != 24).any(axis=1).mean() > 0.95      # no padding band in the crop
+
+
+def test_export_flags_objective_that_does_not_match_the_file_name(tmp_path, monkeypatch, capsys):
+    import types
+    ex = pytest.importorskip('export_from_drive')
+
+    class _F:
+        def __init__(self, path):
+            self.path = path
+            self.sizes = {'Z': 13, 'C': 3, 'Y': 1024, 'X': 1024}
+            mic = types.SimpleNamespace(objectiveName='Plan Apo 20x DIC M N2', objectiveMagnification=20.0,
+                                        objectiveNumericalAperture=0.75)
+            self.metadata = types.SimpleNamespace(channels=[types.SimpleNamespace(microscope=mic)])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def voxel_size(self):
+            return types.SimpleNamespace(x=0.429, y=0.429, z=0.7)
+
+    monkeypatch.setitem(sys.modules, 'nd2', types.SimpleNamespace(ND2File=_F))
+    d = tmp_path / 'Renamed Data' / 'A1'
+    d.mkdir(parents=True)
+    for name in ('1.4Pa_A1_20dec21_40x_L2RA_FlatA_seq006.nd2', '1.4Pa_A1_20dec21_20xA_L2RA_FlatA_seq015.nd2'):
+        (d / name).write_bytes(b'')
+    found, have = ex.pixel_sizes(str(tmp_path))
+    assert have and 'does not match' in found['A1_40x']['note'] and 'note' not in found['A1_20x']
+    assert 'does not match' in capsys.readouterr().err

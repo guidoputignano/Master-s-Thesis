@@ -202,7 +202,10 @@ Ideally the auditor is a second person (e.g. the data owner). Judge a random
 
 Area thresholds and µm² values require the true pixel size. Read it from the
 original `.nd2` files (`export_from_drive.py` does this; the converted TIFFs
-have no calibration). The repository currently uses
+have no calibration). The 20x files record 0.429 µm (Andor iXon 888, 13 µm
+pixels, Plan Apo 20x/0.75, 1.515x zoom). The A1 "40x" files record the 20x
+objective and the same 0.429 µm, although their images are sampled twice as
+finely; `export_from_drive.py` flags this, and the analysis uses 0.2145 µm. The repository currently uses
 0.325 µm (`Analysis/Cell_density.ipynb`), 0.429 µm (`Deconv.ipynb`) and
 650/1024 ≈ 0.635 µm (the paper's field of view) for the same x20
 objective. The scripts deliberately have no default.

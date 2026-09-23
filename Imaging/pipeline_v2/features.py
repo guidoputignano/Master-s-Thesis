@@ -19,11 +19,11 @@ from skimage.measure import regionprops
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'Validation'))
 import seg_eval as se  # noqa: E402
 
-# Calibration of record: 0.429 um/px at 20x, the value in Deconv.ipynb ("Table 4.1":
-# Plan Apo 20x/0.75, 1.515x zoom) and in the simulation code. It equals a 13 um camera
-# pixel (spinning disk, 1024 x 1024 sensor) / (20 * 1.515). The paper's "650 x 650 um
-# at 20x" is the field without the 1.515x lens (13 um * 1024 / 20 = 666 um).
-# 40x is taken as half (the analysis notebooks divide x40 areas by 4).
+# Calibration: 0.429 um/px at 20x, recorded in the .nd2 metadata (Andor iXon 888, 13 um
+# pixels, Plan Apo 20x/0.75, 1.515x zoom: 13 / (20 * 1.515)) and used in Deconv.ipynb. The
+# paper's "650 x 650 um at 20x" is the field without the 1.515x lens (13 um * 1024 / 20).
+# 40x is half. The A1 "40x" .nd2 files wrongly record the 20x objective and 0.429 um/px;
+# their nuclei are four times larger in pixels, which confirms 0.2145 um/px.
 PIXEL_UM = {'20x': 0.429, '40x': 0.2145}
 
 

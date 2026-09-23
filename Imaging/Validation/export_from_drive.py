@@ -108,6 +108,13 @@ def pixel_sizes(root):
                                na=m.objectiveNumericalAperture)
                 except Exception:
                     pass
+            named = re.search(r'(\d+)x$', group)
+            if named and row.get('magnification') and float(row['magnification']) != float(named.group(1)):
+                # The A1 "40x" files record the 20x objective and its pixel size, although the
+                # images are sampled twice as finely (nuclei four times larger in pixels).
+                row['note'] = (f"metadata objective {row['magnification']:g}x does not match the file name "
+                               f"({named.group(1)}x): do not use this pixel size")
+                print(f"warning: {path}: {row['note']}", file=sys.stderr)
             found[group] = row
         except Exception as e:
             print(f"warning: could not read {path}: {e}", file=sys.stderr)
@@ -208,14 +215,15 @@ def main(argv=None):
                           f"{sum(os.path.getsize(p) for p in files) / 1e6:.0f} | | {why} |")
             bundles.setdefault('common', []).extend(files)
     sizes, have_nd2 = pixel_sizes(args.root)
-    report += ['', '| series_magnification | pixel x (um) | pixel y (um) | z step (um) | objective | read from |',
-               '|---|---|---|---|---|---|']
+    report += ['', '| series_magnification | pixel x (um) | pixel y (um) | z step (um) | objective | read from | note |',
+               '|---|---|---|---|---|---|---|']
     for g, r in sorted(sizes.items()):
         report.append(f"| {g} | {r['px_x_um']:.4f} | {r['px_y_um']:.4f} | {r.get('z_step_um', float('nan')):.3f} | "
-                      f"{r.get('objective', '')} {r.get('magnification', '')} NA {r.get('na', '')} | {r['file']} |")
+                      f"{r.get('objective', '')} {r.get('magnification', '')} NA {r.get('na', '')} | {r['file']} | "
+                      f"{r.get('note', '')} |")
     if not sizes:
         report.append('| none found | | | | | ' + ('no readable .nd2 in Renamed Data' if have_nd2 else
-                                                 'run `pip install nd2` so the .nd2 files can be read') + ' |')
+                                                 'run `pip install nd2` so the .nd2 files can be read') + ' | |')
     text = '\n'.join(report)
     print(text)
     if args.check:

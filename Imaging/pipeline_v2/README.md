@@ -31,9 +31,15 @@ There are two variants:
 | Senescence | ordered gates ("Example value" thresholds, per condition) and k-means (k = 2) | shifted-population log-normal mixture of cell area per condition, with BIC and field-level bootstrap (below) |
 | Flow alignment | mean misalignment angle | also the nematic order parameter S = \|⟨exp(2iθ)⟩\| per field (0 = random, 1 = aligned) |
 
-**Calibration.** 0.429 µm/px is the value in `Deconv.ipynb` (Plan Apo 20x/0.75,
-1.515x zoom) and in the simulation code. It equals a 13 µm camera pixel
-(spinning disk, 1024 × 1024 sensor) divided by 20 × 1.515. A field of
+**Calibration.** 0.429 µm/px is recorded in the `.nd2` metadata of the 20x
+files: Andor iXon 888 EMCCD (13 µm pixels, 1024 × 1024), Plan Apo 20x/0.75,
+1.515x zoom, so 13 / (20 × 1.515) µm. `Deconv.ipynb` uses the same value. The
+A1 "40x" files record the 20x objective and 0.429 µm too, but their nuclei are
+four times larger in pixels and a field holds a quarter as many cells, so
+they were taken with a twice stronger objective that the software did not
+register; the analysis uses 0.2145 µm/px, which the nuclear sizes confirm.
+The acquisitions are widefield z-stacks (spinning disk out of the light path;
+13 × 0.7 µm at 20x, 21 × 0.4 µm at 40x). A field of
 "650 × 650 µm at 20x" is the field without the 1.515x lens
 (13 µm × 1024 / 20 = 666 µm); the imaged field is 439 × 439 µm.
 
