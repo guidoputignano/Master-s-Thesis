@@ -268,7 +268,7 @@ def score(args):
 
 
 def cell_precision(key, d, block='cell', by=('folder', 'stratum'), prior='pooled', prior_n=2.0,
-                   n_draw=20000, seed=0):
+                   n_draw=1_000_000, seed=0):
     """Post-stratified precision per method: sum over cells (condition x stratum) of W * p,
     W the cell's share of the method's interior cells (population counts from the key).
 
@@ -301,7 +301,7 @@ def cell_precision(key, d, block='cell', by=('folder', 'stratum'), prior='pooled
     return out
 
 
-def gap_area_precision(key, d, n_draw=20000, seed=0):
+def gap_area_precision(key, d, n_draw=1_000_000, seed=0):
     """Share of gap area confirmed. Uniform samples: answers weighted by component area.
     Area-proportional samples drawn with replacement ('mult' = times drawn): the yes-rate
     within a folder estimates that folder's confirmed area share, and folders are combined

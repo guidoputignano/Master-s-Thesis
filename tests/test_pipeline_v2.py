@@ -272,7 +272,7 @@ def test_scoring_post_stratified_and_pps():
     key = pd.DataFrame(rows)
     d = key.dropna(subset=['yes']).assign(yes=lambda t: t.yes.astype(bool))
     (_, est, lo, hi, used), = bv.cell_precision(key, d, by=('folder', 'stratum'))
-    assert used == 2 and 0.8 < est < 0.9 and lo < est < hi              # 0.9 * p_A + 0.1 * p_B, C dropped
+    assert used == 2 and 0.75 < est < 0.9 and lo < est < hi             # 0.9 * p_A + 0.1 * p_B (median ~0.80), C dropped
     gaps = pd.DataFrame([dict(block='gap', method='m', folder='A', sampling='pps', mult=3, folder_area=1e5, yes=True,
                               area_um2=1e4),
                          dict(block='gap', method='m', folder='B', sampling='pps', mult=3, folder_area=400.0, yes=False,
