@@ -330,3 +330,60 @@ def test_sample_rois_stratifies_and_blinds(tmp_path):
     assert (fields.pred_hole_frac == 0).any()    # a pipeline-empty field is always included
     assert man.roi_id.is_unique and man.blind_id.is_unique
     assert ((cells.y0 >= 32) & (cells.y0 + 128 <= 512 - 32)).all()
+
+
+def test_export_from_drive(tmp_path, monkeypatch):
+    import types
+    import zipfile
+    import export_from_drive as ex
+    root = tmp_path / 'Thesis'
+    k20, k40 = '0Pa_A1_19dec21_20xA_L2RA_FlatA_seq001', '1.4Pa_A1_20dec21_40x_L2RA_FlatA_seq002'
+    files = {
+        f'Segmented/Static-x20/Cell_merged_conservative/{k20}_cell_mask_merged_conservative.tif': grid(),
+        f'Segmented/Static-x20/Holes/denoised_{k20}_Cadherins_regional_segmented.tif': np.zeros((100, 100), np.uint8),
+        f'Segmented/Static-x20/Holes/denoised_{k20}_Cadherins_regional (1)_segmented.tif': np.zeros((100, 100), np.uint8),
+        f'Segmented/1.4Pa-x40/Holes/denoised_{k40}_Cadherins_regional_segmented.tif': np.zeros((100, 100), np.uint8),
+        f'Segmented/1.4Pa-x40/Holes/denoised_{k40}_Cadherins_regional_segmented_dilated.tif': np.zeros((100, 100), np.uint8),
+        f'Projected/Static-x20/Cadherins/tophat/denoised_{k20}_Cadherins_regional_tophat.tif':
+            np.random.default_rng(0).integers(0, 60000, (300, 300)).astype(np.uint16),
+    }
+    for rel, arr in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        tifffile.imwrite(root / rel, arr)
+    (root / 'Analysis/Static-x20/Senescence_Results').mkdir(parents=True)
+    (root / 'Analysis/Static-x20/Senescence_Results/cell_classification_rule_based_full.csv').write_text('a\n1\n')
+    # calibration: the converted TIFF has none (as written by 2Tiff.ipynb), one OME-TIFF has it, and an .nd2 has it
+    (root / 'TIF_Converted/1.4Pa-A-1').mkdir(parents=True)
+    tifffile.imwrite(root / f'TIF_Converted/1.4Pa-A-1/{k20}.tif', np.zeros((2, 8, 8), np.uint16))
+    tifffile.imwrite(root / f'TIF_Converted/1.4Pa-A-1/{k40}.ome.tif', np.zeros((8, 8), np.uint16), ome=True,
+                     metadata={'PhysicalSizeX': 0.1625, 'PhysicalSizeY': 0.1625, 'axes': 'YX'})
+    (root / 'Renamed Data/Static-A-1').mkdir(parents=True)
+    (root / f'Renamed Data/Static-A-1/{k20}.nd2').write_bytes(b'')
+
+    class FakeND2:
+        def __init__(self, path): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def voxel_size(self): return types.SimpleNamespace(x=0.325, y=0.325, z=0.7)
+        sizes = {'Z': 21, 'C': 3, 'Y': 1024, 'X': 1024}
+    monkeypatch.setitem(sys.modules, 'nd2', types.SimpleNamespace(ND2File=FakeND2))
+
+    sizes, have = ex.pixel_sizes(str(root))
+    assert have and sizes['A1_20x']['px_x_um'] == 0.325 and sizes['A1_40x']['px_x_um'] == pytest.approx(0.1625)
+    out = tmp_path / 'export'
+    ex.main(['--root', str(root), '--out', str(out), '--part', 'all', '--conditions', 'Static-x20', '1.4Pa-x40'])
+    report = zipfile.ZipFile(out / 'common_all.zip').read('metadata/export_report.md').decode()
+    row = next(l for l in report.splitlines() if 'Static-x20/Holes ' in l)
+    assert row.split('|')[5].strip() == '1'                       # the "(1)" copy is flagged
+    row40 = next(l for l in report.splitlines() if '1.4Pa-x40/Holes ' in l)
+    assert row40.split('|')[5].strip() == ''                      # plain + dilated are not duplicates
+    assert 'missing/empty' in report and 'A1_20x | 0.3250' in report
+    names = zipfile.ZipFile(out / 'Static-x20_all.zip').namelist()
+    assert f'Segmented/Static-x20/Cell_merged_conservative/{k20}_cell_mask_merged_conservative.tif' in names
+    assert 'Analysis/Static-x20/Senescence_Results/cell_classification_rule_based_full.csv' in names
+    split = tmp_path / 'split'
+    ex.main(['--root', str(root), '--out', str(split), '--part', 'all', '--conditions', 'Static-x20',
+             '--split-mb', '0.15'])
+    parts = sorted(p.name for p in split.glob('Static-x20_all_part*.zip'))
+    assert len(parts) >= 2 and not (split / 'Static-x20_all.zip').exists()
+    assert sum(len(zipfile.ZipFile(split / p).namelist()) for p in parts) == len(names)
