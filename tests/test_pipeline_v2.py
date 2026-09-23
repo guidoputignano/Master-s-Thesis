@@ -279,3 +279,17 @@ def test_scoring_post_stratified_and_pps():
                               area_um2=100.0)])
     (_, est, lo, hi, n), = bv.gap_area_precision(gaps, gaps)
     assert est > 0.8 and n == 6                              # area share, not the 0.5 item share
+
+
+def test_cell_precision_is_design_weighted():
+    bv = pytest.importorskip('build_verdicts')
+    rows = [dict(block='cell', method='m', folder='A', stratum='s', stratum_n=900, yes=y) for y in (1, 1, 0, 0)]
+    rows += [dict(block='cell', method='m', folder='B', stratum='s', stratum_n=100, yes=1) for _ in range(4)]
+    key = pd.DataFrame(rows)
+    d = key.assign(yes=key.yes.astype(bool))
+    (_, est, lo, hi, used), = bv.cell_precision(key, d)                 # truth: 0.9 * 0.5 + 0.1 * 1 = 0.55
+    assert used == 2 and 0.5 < est < 0.68 and lo < 0.55 < hi             # partial pooling: mild pull to 0.75
+    (_, jeff, _, _, _), = bv.cell_precision(key, d, prior='jeffreys')
+    assert jeff == pytest.approx(0.55, abs=0.03)
+    (_, pooled, _, _, _), = bv.cell_precision(key, d, by=('stratum',))  # equal-allocation pooling is biased
+    assert pooled > est + 0.1

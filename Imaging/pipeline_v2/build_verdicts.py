@@ -19,7 +19,7 @@ outline. Three blocks:
 
 ``key.csv`` keeps the hidden metadata (method, condition, stratum and its population
 share). ``score`` reports yes-rates with Wilson intervals and, for the cell block, the
-stratified precision (Jeffreys posterior median and 95 % interval).
+precision post-stratified by condition x stratum (posterior median and 95 % interval).
 """
 from __future__ import annotations
 
@@ -206,22 +206,28 @@ def score(args):
             p, lo, hi = wilson(int(g.yes.sum()), len(g))
             rows.append(dict(zip(by, g_key), n=len(g), yes_rate=p, lo=lo, hi=hi))
         print(pd.DataFrame(rows).to_string(index=False, float_format=lambda v: f"{v:.2f}") + '\n')
-    print('\nCell precision: each stratum weighted by its share of the method\'s interior cells; posterior')
-    print('median and 95 % interval from Jeffreys Beta draws per stratum (strata without answers dropped):')
-    for by, label in ((('stratum',), 'agreement strata, conditions pooled'),
-                      (('folder', 'stratum'), 'condition x agreement strata (sensitivity)')):
-        for method, est, lo, hi, used in cell_precision(key, d, by=by):
-            print(f"  {method}: {est:.3f} [{lo:.3f}, {hi:.3f}]  ({label}; {used} strata)")
+    print('\nCell precision, post-stratified by condition x agreement stratum (weights = population shares;')
+    print('sampling was equal per cell, so pooling conditions would over-weight the small 40x conditions).')
+    print('Posterior median and 95 % interval; strata without answers dropped:')
+    for prior, label in (('pooled', 'prior centred on the stratum rate pooled over conditions, worth 2 items'),
+                         ('jeffreys', 'independent Jeffreys prior per cell (sensitivity)')):
+        for method, est, lo, hi, used in cell_precision(key, d, prior=prior):
+            print(f"  {method}: {est:.3f} [{lo:.3f}, {hi:.3f}]  ({label}; {used} cells)")
     print('\nGap area confirmed:')
     for method, est, lo, hi, n in gap_area_precision(key, d):
         print(f"  {method}: {est:.2f} [{lo:.2f}, {hi:.2f}]  (n={n})")
 
 
-def cell_precision(key, d, block='cell', by=('stratum',), n_draw=20000, seed=0):
-    """Stratified precision per method: sum over strata of W * p, W the stratum's share of
-    the method's interior cells (population counts from the key), p ~ Beta(k + 1/2, n - k + 1/2)
-    (Jeffreys). Returns the posterior median and 95 % interval; strata without yes/no answers
-    are dropped and the weights renormalised."""
+def cell_precision(key, d, block='cell', by=('folder', 'stratum'), prior='pooled', prior_n=2.0,
+                   n_draw=20000, seed=0):
+    """Post-stratified precision per method: sum over cells (condition x stratum) of W * p,
+    W the cell's share of the method's interior cells (population counts from the key).
+
+    p has a Beta posterior. With ``prior='pooled'`` the prior is centred on the stratum's
+    rate pooled over conditions and is worth ``prior_n`` items (partial pooling: few items
+    per cell do not drag the estimate towards 1/2). With ``prior='jeffreys'`` each cell
+    gets Beta(1/2, 1/2). Returns the posterior median and 95 % interval; cells without
+    yes/no answers are dropped and the weights renormalised."""
     rng = np.random.default_rng(seed)
     by = list(by)
     out = []
@@ -233,7 +239,14 @@ def cell_precision(key, d, block='cell', by=('stratum',), n_draw=20000, seed=0):
         w = pop.reindex(cells.index).astype(float).to_numpy()
         w = w / w.sum()
         k, n = cells['sum'].to_numpy(float), cells['count'].to_numpy(float)
-        draws = rng.beta(k + 0.5, n - k + 0.5, size=(n_draw, len(k))) @ w
+        if prior == 'pooled' and 'stratum' in by:
+            tot = g.groupby('stratum').yes.agg(['sum', 'count'])
+            rate = (tot['sum'] + 0.5) / (tot['count'] + 1.0)
+            m = rate.reindex(cells.index.get_level_values('stratum')).to_numpy()
+            a, b = prior_n * m, prior_n * (1 - m)
+        else:
+            a = b = 0.5
+        draws = rng.beta(k + a, n - k + b, size=(n_draw, len(k))) @ w
         lo, med, hi = np.percentile(draws, [2.5, 50, 97.5])
         out.append((method, float(med), float(lo), float(hi), len(k)))
     return out

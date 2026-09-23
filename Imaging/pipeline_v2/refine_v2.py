@@ -14,8 +14,9 @@ VE-cadherin landscape until it meets a junction, as the original watershed did.
   belong to;
 * landscape: VE-cadherin top-hat smoothed with sigma = 1 um, so junctions are ridges;
 * mask: every pixel except the gaps. Gaps are ``analyze.dark_gaps`` on the Cellpose
-  cells, with the nuclear-stain test; pixels within 1 um of a detected nucleus are never
-  gap, so every nucleus can seed a cell.
+  cells, with the nuclear-stain test. Pixels within about 1 um of a detected nucleus (a
+  dilation by round(1 um / pixel) steps: 2 px at 20x, 5 px at 40x) are never gap, so every
+  nucleus can seed a cell.
 
 Reads the segment_v2.py output and writes, per field, to ``--out/<cond>/``:
 ``<key>_v2_cells.tif`` (grown cells), ``<key>_v2_nuclei.tif`` (copied),
@@ -76,7 +77,7 @@ def markers(cells, nuclei):
 
 
 def refine(cells, nuclei, cad_tophat, cad_raw, nuc_img, um):
-    # A detected nucleus (plus 1 um) is never gap, so every nucleus can get a cell.
+    # A detected nucleus (plus about 1 um) is never gap, so every nucleus can get a cell.
     nuc_zone = ndimage.binary_dilation(nuclei > 0, iterations=max(1, int(round(1.0 / um))))
 
     def gaps_at(pct):
