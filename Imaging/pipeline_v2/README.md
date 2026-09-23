@@ -24,7 +24,7 @@ There are two variants:
 |---|---|---|
 | Nuclei | Cellpose `cyto3` on the nuclear channel (d = 30 px), intensity/area filter | Cellpose `nuclei`, d = 11.2 µm (26 px at 20x, 52 px at 40x); nuclear top-hat at 20x, projection without top-hat at 40x (the top-hat hollows 40x nuclei) |
 | Whole cells | one watershed region per nuclear seed on the VE-cadherin gradient; seeds merged by a corridor test with per-condition distances (2–25 px) | Cellpose `cyto3` on VE-cadherin + nuclei, d = 25.7 µm (60 px at 20x, 120 px at 40x) |
-| Holes / gaps | histogram-valley threshold, per-folder gating and manual overrides; watershed barrier only at 1.4 Pa | darker than all but 1 % of the field's cell interiors (VE-cadherin without top-hat, σ = 1 µm), outside nucleated cells, opened with r = 0.86 µm (2 px at 20x, 4 px at 40x), >= 10 µm², at most 5 % nuclear pixels; uncovered area reported separately |
+| Holes / gaps | histogram-valley threshold, per-folder gating and manual overrides; watershed barrier only at 1.4 Pa | darker than all but 1 % of the field's cell interiors (VE-cadherin without top-hat, σ = 1 µm), outside nucleated cells, opened with r = 0.86 µm (2 px at 20x, 4 px at 40x), >= 10 µm², at most 5 % nuclear pixels; v2.1 grows each gap over connected pixels that pass at the 5th percentile; uncovered area reported separately |
 | Parameters | per condition, some per field | one setting for every condition, in micrometres |
 | Units | pixels (x40 areas divided by 4) | µm, 0.429 µm/px at 20x and 0.2145 µm/px at 40x |
 | Border cells | kept in all statistics | flagged; excluded from morphology and senescence estimates |
@@ -43,6 +43,34 @@ which bare substrate lacks. The gap rule therefore uses the projection
 without top-hat and a per-field threshold taken from the cells themselves.
 Uncovered pixels that are at cytoplasm level, or contain a nucleus, are
 missed cells, not gaps.
+
+**Gap extent (v2.1, after the second review).** The reviewer saw gaps
+extending beyond their outline. A gap now starts from the 1st-percentile
+seeds, which are unchanged, and grows over connected pixels that pass the same
+test at the 5th percentile. Enclosed specks under 10 µm² without nuclear
+signal are filled. `refine_v2.py --no-grow` keeps the seeds only, which are
+the masks the second review showed; they are also stored as value 8 in
+`_v2_gaps_sens.tif`.
+
+**Field quality and repeated fields** (`quality.py`). Neither check uses a
+segmentation.
+
+- *Junction clarity.* Bright ridges are measured at the junction scale on the
+  VE-cadherin top-hat (Hessian, σ = 0.6 µm). The score is their 95th
+  percentile divided by the noise (MAD of the Laplacian residual). A field is
+  low quality when its log score is more than 3 robust SDs below the median
+  of its condition and magnification. Defocus and haze lower the score.
+  Comparing within a condition keeps flow-induced junction changes out of the
+  rule.
+- *Repeated fields.* Two fields of one condition that image the same area
+  (phase correlation: overlap >= 50 %, r >= 0.9) would count the same cells
+  twice. The one with the higher score is kept.
+
+`analyze.py --exclude-fields quality.csv` leaves out both kinds.
+`build_verdicts.py score --exclude-fields quality.csv --strata strata.csv`
+leaves out answers from low-quality fields only, because repeated fields are
+clear images. It rescales each condition × stratum population to the fields
+that remain; `build_verdicts.py strata` writes those counts.
 
 **Nuclei folder in v1.** `Segmented/<c>/Nuclei` is the filtered subset of
 `Nuclei_raw` and the source of the seeds in Static-x20, Static-x40 and
@@ -91,12 +119,20 @@ pip install cellpose==3.1.1.1 tifffile scikit-image pandas scipy pillow
 python segment_v2.py --root /path/to/data-mt --out /private/v2_masks
 # 1b. v2.1: grow the Cellpose cells to their junctions (seconds per field)
 python refine_v2.py --root /path/to/data-mt --v2 /private/v2_masks --out /private/v2r_masks
+# 1c. field quality and repeated fields
+python quality.py --root /path/to/data-mt --v2 /private/v2r_masks --out /private/quality.csv
 # 2. per-cell features for v1 and v2 (or v2.1: --v2 /private/v2r_masks), agreement, gaps, alignment, mixtures
-python analyze.py --root /path/to/data-mt --v2 /private/v2_masks --out /private/v2_analysis
+python analyze.py --root /path/to/data-mt --v2 /private/v2_masks --out /private/v2_analysis \
+    --exclude-fields /private/quality.csv
 # 3. blind yes/no session (one self-contained HTML file) and its scoring
 python build_verdicts.py build --root /path/to/data-mt --v2 /private/v2_masks \
     --analysis /private/v2_analysis --out /private/verdicts
 python build_verdicts.py score --session /private/verdicts/index.html --code 'VS147:YYN...'
+# 3b. the same, without low-quality fields (population weights rescaled)
+python build_verdicts.py strata --root /path/to/data-mt --v2 /private/v2_masks \
+    --analysis /private/v2_analysis --tag v2 --out /private/strata.csv
+python build_verdicts.py score --session /private/verdicts/index.html --verdicts answers.csv \
+    --exclude-fields /private/quality.csv --strata /private/strata.csv
 ```
 
 The data root follows the layout of the data repository:

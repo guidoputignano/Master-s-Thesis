@@ -46,6 +46,7 @@ DUPLICATE = re.compile(r'\s?\(\d+\)')   # 'seq001 (1).tif', 'tophat(1).tif': cop
 GAP_MIN_UM2 = 10.0      # smallest gap counted (fixed before any review; 25 and 50 um^2 reported as sensitivity)
 GAP_OPEN_UM = 0.858     # opening radius: exactly 2 px at 20x and 4 px at 40x (removes inter-cell lines)
 GAP_DARK_PCT = 1.0      # gap pixels are darker than all but this % of cell interiors (per field)
+GAP_GROW_PCT = 5.0      # v2.1: a gap extends over connected pixels darker than this percentile
 GAP_SMOOTH_UM = 1.0     # Gaussian smoothing of the VE-cadherin projection before the darkness test
 CORE_UM = 2.0           # cell interior = farther than this from any cell boundary
 
@@ -137,6 +138,22 @@ def dark_gaps(cells, nuclei, cad, um, pct=GAP_DARK_PCT, nuc_img=None, min_um2=GA
     return keep[lab], thr
 
 
+def grow_gaps(seeds, cand, nuclear, um, max_hole_um2=GAP_MIN_UM2):
+    """Extend gap seeds over connected candidate pixels (hysteresis), then fill enclosed
+    holes smaller than ``max_hole_um2`` that carry no nuclear signal (specks of debris or
+    noise inside bare substrate)."""
+    lab = cc_label(seeds | cand, connectivity=2)
+    ext = np.isin(lab, np.unique(lab[seeds])) & (lab > 0)
+    holes = cc_label(ndimage.binary_fill_holes(ext) & ~ext, connectivity=1)
+    if holes.max():
+        area = np.bincount(holes.ravel()) * um ** 2
+        nuc = np.bincount(holes.ravel(), weights=np.asarray(nuclear, float).ravel(), minlength=len(area))
+        fill = (area < max_hole_um2) & (nuc == 0)
+        fill[0] = False
+        ext |= fill[holes]
+    return ext
+
+
 def gap_quality(h1, h2, cad, nuc_img, nuclei, cells, um):
     """Method-agnostic checks of gap masks: VE-cadherin intensity inside the gaps relative
     to the median cell interior (bare substrate should sit far below 1), and the share of
@@ -187,7 +204,15 @@ def nematic(df, min_ar=1.3):
     return abs(z), (np.rad2deg(np.angle(z)) / 2) % 180
 
 
-def run(root, v2_root, out, conds, limit=None):
+def excluded_fields(path):
+    """Keys flagged ``exclude`` in a quality.py table (low quality or a repeated field)."""
+    if not path:
+        return set()
+    q = pd.read_csv(path)
+    return set(q.loc[q.exclude.astype(str).str.lower().isin(['true', '1']), 'key'])
+
+
+def run(root, v2_root, out, conds, limit=None, exclude=()):
     os.makedirs(out, exist_ok=True)
     all1, all2, fields, agree = [], [], [], []
     for cond in conds:
@@ -201,7 +226,7 @@ def run(root, v2_root, out, conds, limit=None):
         nucimg = {k: n for k, (_, n) in segment_inputs(root, cond).items()}
         pre = index(f'{v2_root}/{cond}', '*_v2_gaps.tif')             # written by refine_v2.py
         pre_sens = index(f'{v2_root}/{cond}', '*_v2_gaps_sens.tif')
-        keys = sorted(set(v1c) & set(v2c) & set(v2n) & set(cad))[:limit]
+        keys = sorted(set(v1c) & set(v2c) & set(v2n) & set(cad) - set(exclude))[:limit]
         os.makedirs(f'{out}/v2_gaps/{cond}', exist_ok=True)
         for k in keys:
             um = ft.pixel_um(k)
@@ -215,6 +240,9 @@ def run(root, v2_root, out, conds, limit=None):
                 h2, thr = tifffile.imread(pre[k]) > 0, np.nan
                 sv = tifffile.imread(pre_sens[k]) if k in pre_sens else np.zeros(h2.shape, np.uint8)
                 sens = {'v2_gap_frac_p0.5': ((sv & 2) > 0).mean(), 'v2_gap_frac_p5': ((sv & 4) > 0).mean()}
+                seeds = (sv & 8) > 0                                 # refine_v2.py: the 1 % seeds, not grown
+                if seeds.any() or not h2.any():                      # (older masks without seeds: left blank)
+                    sens['v2_gap_frac_seeds'] = seeds.mean()
             else:
                 h2, thr = dark_gaps(c2, n2, img, um, nuc_img=nimg)
                 sens = {f'v2_gap_frac_p{p:g}': dark_gaps(c2, n2, img, um, p, nimg)[0].mean() for p in (0.5, 5.0)}
@@ -370,9 +398,14 @@ def main(argv=None):
     ap.add_argument('--out', required=True)
     ap.add_argument('--conditions', nargs='+', default=CONDS)
     ap.add_argument('--limit', type=int, help='fields per condition (quick look)')
+    ap.add_argument('--exclude-fields', help='quality.py table; fields marked exclude are left out')
     args = ap.parse_args(argv)
-    c1, c2, fdf, adf = run(args.root, args.v2, args.out, args.conditions, args.limit)
+    skip = excluded_fields(args.exclude_fields)
+    c1, c2, fdf, adf = run(args.root, args.v2, args.out, args.conditions, args.limit, skip)
     lines = ['# v1 vs v2 on the same fields\n']
+    if skip:
+        lines += [f'{len(skip)} fields left out (quality.py: low quality or repeated): '
+                  + ', '.join(sorted(skip)) + '\n']
     tab = pd.concat([describe(c1, fdf, 'v1'), describe(c2, fdf, 'v2')]).sort_values(['condition', 'method'])
     lines += ['## Per condition (interior cells unless noted)\n', md_table(tab.round(2).set_index('method'))]
     a = adf.groupby('condition')[['v1', 'v2', 'matched', 'v1_split_by_v2', 'v2_merging_v1',

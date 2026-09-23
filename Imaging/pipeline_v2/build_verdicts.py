@@ -70,8 +70,12 @@ def render(rgb, mask, um, pad_um=12.0, min_half_um=20.0, size=420, bar_um=10.0):
     cy, cx = (ys.min() + ys.max()) // 2, (xs.min() + xs.max()) // 2
     half = max((ys.max() - ys.min()) // 2 + round(pad_um / um), (xs.max() - xs.min()) // 2 + round(pad_um / um),
                round(min_half_um / um))
-    y0, y1 = max(0, cy - half), min(mask.shape[0], cy + half + 1)
-    x0, x1 = max(0, cx - half), min(mask.shape[1], cx + half + 1)
+    # Shift the window inside the field instead of clipping it, so objects at the border
+    # still get a full square crop (clipped crops showed mostly padding).
+    side = min(2 * half + 1, mask.shape[0], mask.shape[1])
+    y0 = int(np.clip(cy - half, 0, mask.shape[0] - side))
+    x0 = int(np.clip(cx - half, 0, mask.shape[1] - side))
+    y1, x1 = y0 + side, x0 + side
     crop, m = rgb[y0:y1, x0:x1], mask[y0:y1, x0:x1]
     scale = size / max(crop.shape[:2])
     wh = (max(1, round(crop.shape[1] * scale)), max(1, round(crop.shape[0] * scale)))
@@ -193,10 +197,55 @@ def build(args):
     print(todo.groupby(['block', 'method']).size().to_string())
 
 
+def strata_counts(root, v2, analysis, conds, tag='v2'):
+    """Interior cells per field, method and agreement stratum (matched: a one-to-one partner
+    at IoU >= 0.5 in the other method), as the session builders define the strata."""
+    rows = []
+    cells = {'v1': pd.read_csv(os.path.join(analysis, 'cells_v1.csv')),
+             tag: pd.read_csv(os.path.join(analysis, 'cells_v2.csv'))}
+    inner = {m: c[~c.touches_border] for m, c in cells.items()}
+    for cond in conds:
+        v1c = an.index(f'{root}/Segmented/{cond}/Cell_merged_conservative')
+        v2c = an.index(f'{v2}/{cond}', '*_v2_cells.tif')
+        for k in sorted(set(v1c) & set(v2c)):
+            m1, m2 = matched_labels(tifffile.imread(v1c[k]), tifffile.imread(v2c[k]))
+            for m, matched in (('v1', m1), (tag, m2)):
+                lab = inner[m][inner[m].key == k].label
+                n_m = int(lab.isin(matched).sum())
+                rows += [dict(key=k, folder=cond, method=m, stratum='matched', n=n_m),
+                         dict(key=k, folder=cond, method=m, stratum='unmatched', n=len(lab) - n_m)]
+    return pd.DataFrame(rows)
+
+
+def restrict(key, d, exclude, strata=None):
+    """Drop answers from excluded fields. With per-field stratum counts, rescale each
+    condition x stratum population of the cell block to the fields that remain."""
+    d = d[~d.key.isin(exclude)]
+    if strata is None:
+        return key, d
+    key = key.copy()
+    keep = strata[~strata.key.isin(exclude)].groupby(['method', 'folder', 'stratum']).n.sum()
+    full = strata.groupby(['method', 'folder', 'stratum']).n.sum()
+    frac = (keep / full).fillna(0.0)
+    cell = key.block.eq('cell')
+    idx = pd.MultiIndex.from_frame(key.loc[cell, ['method', 'folder', 'stratum']])
+    key.loc[cell, 'stratum_n'] = key.loc[cell, 'stratum_n'].to_numpy() * frac.reindex(idx).fillna(1.0).to_numpy()
+    return key, d
+
+
 def score(args):
     key = vs.read_key(args.session)
     ver = vs.decode(args.code, len(key)) if args.code else pd.read_csv(args.verdicts, dtype=str).fillna('')
     d = key.merge(ver.rename(columns={'id': 'verdict_id'}), on='verdict_id')
+    if getattr(args, 'exclude_fields', None):
+        q = pd.read_csv(args.exclude_fields)
+        low = set(q.loc[q.low_quality.astype(str).str.lower().isin(['true', '1']), 'key'])
+        strata = pd.read_csv(args.strata) if getattr(args, 'strata', None) else None
+        n0 = len(d)
+        key, d = restrict(key, d, low, strata)
+        print(f"Low-quality fields left out ({len(low)}): {n0 - len(d)} answers dropped"
+              + ('' if strata is not None else '; population weights not rescaled (no --strata)') + '\n')
+    ver = ver[ver.id.isin(d.verdict_id)]
     d = d[d.answer.isin(['yes', 'no'])].assign(yes=lambda x: x.answer.eq('yes'))
     print(f"{len(d)} yes/no answers ({(ver.answer == 'unsure').sum()} unsure, "
           f"{(~ver.answer.isin(['yes', 'no', 'unsure'])).sum()} unanswered)\n")
@@ -294,8 +343,23 @@ def main(argv=None):
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument('--verdicts')
     g.add_argument('--code')
+    s.add_argument('--exclude-fields', help='quality.py table: answers from low-quality fields are left out '
+                                            '(repeated fields are clear images, so their answers count)')
+    s.add_argument('--strata', help='output of the strata command, to rescale the population weights')
+    t = sub.add_parser('strata', help='interior cells per field, method and agreement stratum')
+    t.add_argument('--root', required=True)
+    t.add_argument('--v2', required=True, help='the second method\'s masks (segment_v2.py or refine_v2.py output)')
+    t.add_argument('--analysis', required=True, help='analyze.py output for the same pair of methods')
+    t.add_argument('--tag', default='v2', help="the second method's name in the session key (v2 or v2.1)")
+    t.add_argument('--out', required=True)
+    t.add_argument('--conditions', nargs='+', default=an.CONDS)
     args = ap.parse_args(argv)
-    build(args) if args.cmd == 'build' else score(args)
+    if args.cmd == 'build':
+        build(args)
+    elif args.cmd == 'score':
+        score(args)
+    else:
+        strata_counts(args.root, args.v2, args.analysis, args.conditions, args.tag).to_csv(args.out, index=False)
 
 
 if __name__ == '__main__':

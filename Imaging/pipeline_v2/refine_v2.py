@@ -13,16 +13,20 @@ VE-cadherin landscape until it meets a junction, as the original watershed did.
   fragments are not markers, so their pixels go to the neighbour whose basin they
   belong to;
 * landscape: VE-cadherin top-hat smoothed with sigma = 1 um, so junctions are ridges;
-* mask: every pixel except the gaps. Gaps are ``analyze.dark_gaps`` on the Cellpose
+* mask: every pixel except the gaps. Gap seeds are ``analyze.dark_gaps`` on the Cellpose
   cells, with the nuclear-stain test. Pixels within about 1 um of a detected nucleus (a
   dilation by round(1 um / pixel) steps: 2 px at 20x, 5 px at 40x) are never gap, so every
-  nucleus can seed a cell.
+  nucleus can seed a cell. After the second review, each seed is grown over the connected
+  pixels that pass the same test at the 5th percentile (the reviewer saw gaps extending
+  beyond their outline), and enclosed specks under 10 um^2 without nuclear signal are
+  filled.
 
 Reads the segment_v2.py output and writes, per field, to ``--out/<cond>/``:
 ``<key>_v2_cells.tif`` (grown cells), ``<key>_v2_nuclei.tif`` (copied),
-``<key>_v2_gaps.tif`` (gaps at the 1st percentile) and ``<key>_v2_gaps_sens.tif``
-(bit 1: threshold at the 0.5th percentile, bit 2: at the 5th). ``analyze.py --v2 <out>``
-then compares v1 with v2.1 and uses these gap masks.
+``<key>_v2_gaps.tif`` (the grown gaps) and ``<key>_v2_gaps_sens.tif`` (value 2: threshold at
+the 0.5th percentile, 4: at the 5th, 8: the 1st-percentile seeds before growth, the masks the
+second review showed). ``analyze.py --v2 <out>`` then compares v1 with v2.1 and uses these
+gap masks.
 
   python refine_v2.py --root /path/to/data-mt --v2 v2_masks --out v2r_masks
 """
@@ -76,16 +80,20 @@ def markers(cells, nuclei):
                    fragments_dropped=int(len(no_nuc) - len(kept_free)), orphan_markers=added)
 
 
-def refine(cells, nuclei, cad_tophat, cad_raw, nuc_img, um):
+def refine(cells, nuclei, cad_tophat, cad_raw, nuc_img, um, grow=True):
     # A detected nucleus (plus about 1 um) is never gap, so every nucleus can get a cell.
     nuc_zone = ndimage.binary_dilation(nuclei > 0, iterations=max(1, int(round(1.0 / um))))
 
-    def gaps_at(pct):
-        g, t = an.dark_gaps(cells, nuclei, cad_raw, um, pct, nuc_img, CANDIDATE_MIN_UM2)
-        return an.area_filter(g & ~nuc_zone, um, CANDIDATE_MIN_UM2), t
+    def gaps_at(pct, min_um2=CANDIDATE_MIN_UM2):
+        g, t = an.dark_gaps(cells, nuclei, cad_raw, um, pct, nuc_img, min_um2)
+        return an.area_filter(g & ~nuc_zone, um, min_um2), t
 
-    gaps, thr = gaps_at(an.GAP_DARK_PCT)
-    sens = np.zeros(cells.shape, np.uint8)
+    seeds, thr = gaps_at(an.GAP_DARK_PCT)
+    gaps = seeds
+    if grow:
+        nuclear = (nuclei > 0) | an.nuclear_signal(nuc_img, nuclei)
+        gaps = an.grow_gaps(seeds, gaps_at(an.GAP_GROW_PCT, 0.0)[0], nuclear, um)
+    sens = (seeds * 8).astype(np.uint8)
     for bit, pct in ((2, 0.5), (4, 5.0)):
         sens |= (gaps_at(pct)[0] * bit).astype(np.uint8)
     m, info = markers(cells, nuclei)
@@ -94,7 +102,8 @@ def refine(cells, nuclei, cad_tophat, cad_raw, nuc_img, um):
     grown = watershed(land, markers=m, mask=~gaps)
     grown, _, _ = relabel_sequential(grown)
     info.update(threshold=thr, cells_in=int(len(np.unique(cells)) - 1), cells_out=int(grown.max()),
-                covered_in=float((cells > 0).mean()), covered_out=float((grown > 0).mean()))
+                covered_in=float((cells > 0).mean()), covered_out=float((grown > 0).mean()),
+                gap_seeds=float(seeds.mean()), gaps=float(gaps.mean()))
     return grown.astype(np.uint32), gaps, sens, info
 
 
@@ -104,6 +113,7 @@ def main(argv=None):
     ap.add_argument('--v2', required=True, help='segment_v2.py output')
     ap.add_argument('--out', required=True)
     ap.add_argument('--conditions', nargs='+', default=sg.CONDS)
+    ap.add_argument('--no-grow', action='store_true', help='gaps = the 1st-percentile seeds (as in the second review)')
     args = ap.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
     log = open(os.path.join(args.out, 'refine_log.jsonl'), 'a')
@@ -118,7 +128,7 @@ def main(argv=None):
             cells, nuclei = tifffile.imread(v2c[k]), tifffile.imread(v2n[k])
             cad_p, nuc_p = imgs[k]
             grown, gaps, sens, info = refine(cells, nuclei, tifffile.imread(cad_p), tifffile.imread(raw[k]),
-                                             tifffile.imread(nuc_p), um)
+                                             tifffile.imread(nuc_p), um, grow=not args.no_grow)
             base = os.path.join(args.out, cond, k)
             tifffile.imwrite(f'{base}_v2_cells.tif', grown, compression='zlib')
             tifffile.imwrite(f'{base}_v2_gaps.tif', gaps.astype(np.uint8), compression='zlib')

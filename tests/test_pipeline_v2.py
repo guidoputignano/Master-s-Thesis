@@ -293,3 +293,93 @@ def test_cell_precision_is_design_weighted():
     assert jeff == pytest.approx(0.55, abs=0.03)
     (_, pooled, _, _, _), = bv.cell_precision(key, d, by=('stratum',))  # equal-allocation pooling is biased
     assert pooled > est + 0.1
+
+
+def _junction_field(rng, blur_px=0.0, shape=(200, 200), step=40):
+    """Bright 2-px lines on a grid (junctions) over a dim background, plus noise."""
+    from scipy import ndimage
+    img = np.full(shape, 100.0)
+    img[::step, :] = img[1::step, :] = 400.0
+    img[:, ::step] = img[:, 1::step] = 400.0
+    if blur_px:
+        img = ndimage.gaussian_filter(img, blur_px)
+    return img + rng.normal(0, 10, shape)
+
+
+def test_quality_ridge_snr_drops_with_blur_and_z_flags_outlier():
+    qm = pytest.importorskip('quality')
+    rng = np.random.default_rng(3)
+    sharp = qm.ridge_snr(_junction_field(rng), 0.429)
+    blurred = qm.ridge_snr(_junction_field(rng, blur_px=4.0), 0.429)
+    assert blurred < 0.5 * sharp
+    assert qm.noise_sigma(rng.normal(0, 10, (300, 300))) == pytest.approx(10, rel=0.05)
+    z = qm.robust_z([10, 11, 9, 10.5, 9.5, 10.2, 3.0])
+    assert z[-1] < -3 and (np.abs(z[:-1]) < 2).all()
+
+
+def test_quality_nuclear_contrast_drops_with_blur():
+    qm = pytest.importorskip('quality')
+    from scipy import ndimage
+    yy, xx = np.mgrid[:120, :120]
+    nuclei = np.zeros((120, 120), np.int32)
+    for i, (cy, cx) in enumerate(((30, 30), (30, 90), (90, 30), (90, 90)), 1):
+        nuclei[(yy - cy) ** 2 + (xx - cx) ** 2 <= 12 ** 2] = i
+    img = np.where(nuclei > 0, 1000.0, 100.0)
+    sharp = qm.nuclear_contrast(img, nuclei, 0.429)
+    hazy = qm.nuclear_contrast(ndimage.gaussian_filter(img, 5.0), nuclei, 0.429)
+    assert sharp == pytest.approx(9.0, rel=0.01) and hazy < 0.6 * sharp
+
+
+def test_quality_repeated_fields_and_assess():
+    qm = pytest.importorskip('quality')
+    rng = np.random.default_rng(5)
+    from scipy import ndimage
+    base = ndimage.gaussian_filter(rng.random((300, 300)), 3)
+    a = base[:256, :256]
+    b = base[40:296, 20:276] + rng.normal(0, 0.002, (256, 256))      # same area, shifted: overlap ~0.75
+    c = ndimage.gaussian_filter(rng.random((256, 256)), 3)           # a different field
+    pairs = qm.repeated_fields({'f1': a, 'f2': b, 'f3': c}, size=256)
+    assert [(p[0], p[1]) for p in pairs] == [('f1', 'f2')] and pairs[0][2] > 0.7 and pairs[0][3] > 0.9
+    rows = [dict(key=f'k{i}', ridge_snr=s, nuclear_contrast=5.0) for i, s in enumerate([10, 11, 9, 10, 10.5, 2.0])]
+    q = qm.assess(rows, [('k0', 'k1', 1.0, 0.99)]).set_index('key')
+    assert q.low_quality.tolist() == [False] * 5 + [True]
+    assert q.duplicate_of['k0'] == 'k1' and q.duplicate_of['k1'] == ''     # the lower score is dropped
+    assert q.exclude.tolist() == [True, False, False, False, False, True]
+
+
+def test_scoring_restrict_drops_fields_and_rescales_population():
+    bv = pytest.importorskip('build_verdicts')
+    key = pd.DataFrame([dict(verdict_id='V1', block='cell', method='m', folder='A', stratum='s', stratum_n=100, key='a1'),
+                        dict(verdict_id='V2', block='cell', method='m', folder='A', stratum='s', stratum_n=100, key='a2'),
+                        dict(verdict_id='V3', block='gap', method='m', folder='A', stratum='component', key='a2')])
+    d = key.assign(yes=True)
+    strata = pd.DataFrame([dict(key='a1', folder='A', method='m', stratum='s', n=75),
+                           dict(key='a2', folder='A', method='m', stratum='s', n=25)])
+    k2, d2 = bv.restrict(key, d, {'a2'}, strata)
+    assert d2.verdict_id.tolist() == ['V1']
+    assert k2.loc[k2.block == 'cell', 'stratum_n'].tolist() == [75.0, 75.0]
+
+
+def test_grow_gaps_extends_seeds_and_fills_specks():
+    an = pytest.importorskip('analyze')
+    seeds = np.zeros((60, 60), bool)
+    seeds[20:26, 20:26] = True
+    cand = np.zeros_like(seeds)
+    cand[18:40, 18:40] = True                     # the dark region around the seed
+    cand[29, 29] = False                          # a 1-px speck inside it
+    cand[50:55, 50:55] = True                     # dark but never reaches the seed threshold
+    nuclear = np.zeros_like(seeds)
+    g = an.grow_gaps(seeds, cand, nuclear, 0.429)
+    assert g[18:40, 18:40].all() and not g[50:55, 50:55].any()
+    nuclear[29, 29] = True                        # a speck with nuclear signal stays open
+    assert not an.grow_gaps(seeds, cand, nuclear, 0.429)[29, 29]
+
+
+def test_render_keeps_full_crop_at_border():
+    bv = pytest.importorskip('build_verdicts')
+    rgb = np.random.default_rng(0).random((200, 200, 3))
+    mask = np.zeros((200, 200), bool)
+    mask[0:6, 90:100] = True                      # object on the top edge
+    im = np.asarray(bv.render(rgb, mask, 0.429, size=100))
+    left = im[:, :100]
+    assert (left.reshape(-1, 3) != 24).any(axis=1).mean() > 0.95      # no padding band in the crop
