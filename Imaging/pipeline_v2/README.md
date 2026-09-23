@@ -81,7 +81,7 @@ python analyze.py --root /path/to/data-mt --v2 /private/v2_masks --out /private/
 # 3. blind yes/no session (one self-contained HTML file) and its scoring
 python build_verdicts.py build --root /path/to/data-mt --v2 /private/v2_masks \
     --analysis /private/v2_analysis --out /private/verdicts
-python build_verdicts.py score --session /private/verdicts --code 'VS152:YYN...'
+python build_verdicts.py score --session /private/verdicts/index.html --code 'VS147:YYN...'
 ```
 
 The data root follows the layout of the data repository:

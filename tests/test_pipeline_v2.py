@@ -120,12 +120,15 @@ def test_verdict_session_embed_code_and_score(tmp_path):
                   block='cell', method='v1' if i < 2 else 'v2') for i in range(4)]
     page = vs.write_session(items, str(tmp_path), title='t', seed=1, embed=True)
     html = open(page).read()
-    assert html.count('data:image/jpeg;base64,') == 4 and 'v1' not in html and 'v2' not in html
+    shown = html.split('const ITEMS=', 1)[1].split('const KEYZ=', 1)[0]      # what the page displays
+    assert html.count('data:image/jpeg;base64,') == 4 and 'v1' not in shown and 'v2' not in shown
     key = pd.read_csv(tmp_path / 'key.csv')
     assert list(key.verdict_id) == ['V0001', 'V0002', 'V0003', 'V0004']
     answers = ''.join('Y' if m == 'v2' else 'N' for m in key.method)
     t = vs.score(str(tmp_path), by=['method'], code=f'VS4:{answers}').set_index('method')
     assert t.loc['v1', 'yes_rate'] == 0 and t.loc['v2', 'yes_rate'] == 1
+    t2 = vs.score(page, by=['method'], code=f'VS4:{answers}').set_index('method')   # key read from the page
+    assert t2.equals(t)
     assert list(vs.decode('VS3:Y-U').answer) == ['yes', '', 'unsure']
     with pytest.raises(ValueError):
         vs.decode('VS3:YY')

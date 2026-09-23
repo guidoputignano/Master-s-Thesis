@@ -8,7 +8,7 @@ crop and the question. Method names, predicted classes and conditions stay in
 ``key.csv`` for scoring:
 
   python verdict_session.py score --session DIR --verdicts verdicts.csv --by block,method
-  python verdict_session.py score --session DIR --code 'VS164:YYNU...' --by block,method
+  python verdict_session.py score --session DIR/index.html --code 'VS164:YYNU...' --by block,method
 
 reports the yes-rate per group with Wilson 95% intervals (unsure answers excluded
 and counted separately).
@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+import zlib
 
 import numpy as np
 import pandas as pd
@@ -41,7 +42,8 @@ def _data_uri(image, quality=88):
 def write_session(items, out_dir, title='Verdict session', seed=0, embed=False):
     """``items``: dicts with 'id', 'question', 'image' (PIL) and hidden metadata. Shuffled.
 
-    With ``embed`` the crops are inlined, so ``index.html`` is a single portable file.
+    With ``embed`` the crops are inlined and a compressed copy of ``key.csv`` is stored
+    in the page (never displayed), so ``index.html`` alone can be answered and scored.
     """
     os.makedirs(os.path.join(out_dir, 'crops'), exist_ok=True)
     order = np.random.default_rng(seed).permutation(len(items))
@@ -56,9 +58,13 @@ def write_session(items, out_dir, title='Verdict session', seed=0, embed=False):
             src = f'crops/{vid}.png'
         meta.append({'verdict_id': vid, **{a: b for a, b in it.items() if a != 'image'}})
         page_items.append({'id': vid, 'q': it['question'], 'src': src})
-    pd.DataFrame(meta).to_csv(os.path.join(out_dir, 'key.csv'), index=False)
+    key_csv = pd.DataFrame(meta).to_csv(index=False)
+    with open(os.path.join(out_dir, 'key.csv'), 'w') as f:
+        f.write(key_csv)
+    packed = base64.b64encode(zlib.compress(key_csv.encode(), 9)).decode() if embed else ''
     page = (HTML.replace('__TITLE__', title).replace('__ITEMS__', json.dumps(page_items))
-            .replace('__STORE__', json.dumps('verdicts:' + title + ':' + str(len(meta)))))
+            .replace('__STORE__', json.dumps('verdicts:' + title + ':' + str(len(meta))))
+            .replace('__KEYZ__', json.dumps(packed)))
     with open(os.path.join(out_dir, 'index.html'), 'w') as f:
         f.write(page)
     return os.path.join(out_dir, 'index.html')
@@ -75,8 +81,18 @@ def decode(code, n=None):
     return pd.DataFrame([{'id': f"V{i + 1:04d}", 'answer': inv.get(c, '')} for i, c in enumerate(m.group(2))])
 
 
+def read_key(session):
+    """The hidden key: ``key.csv`` in a session folder, or the copy inside ``index.html``."""
+    if os.path.isdir(session):
+        return pd.read_csv(os.path.join(session, 'key.csv'))
+    m = re.search(r'const KEYZ=("[^"]*");', open(session).read())
+    if not m or not json.loads(m.group(1)):
+        raise ValueError(f'{session}: no embedded key')
+    return pd.read_csv(io.StringIO(zlib.decompress(base64.b64decode(json.loads(m.group(1)))).decode()))
+
+
 def score(session, verdicts=None, by=('block',), code=None):
-    key = pd.read_csv(os.path.join(session, 'key.csv'))
+    key = read_key(session)
     ver = decode(code, len(key)) if code is not None else pd.read_csv(verdicts, dtype=str).fillna('')
     ver = ver.rename(columns={'id': 'verdict_id'})
     d = key.merge(ver, on='verdict_id', how='inner')
@@ -118,7 +134,8 @@ into the chat, or <b>Download CSV</b>.</p>
 <button id="cp">Copy answer code</button><button id="dl">Download CSV</button></div>
 <textarea id="code" rows="3" readonly placeholder="answer code appears here"></textarea>
 </main><script>
-const ITEMS=__ITEMS__, KEY=__STORE__; let st={}; try{st=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+const ITEMS=__ITEMS__, KEY=__STORE__;
+const KEYZ=__KEYZ__; let st={}; try{st=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
 let i=0; const $=id=>document.getElementById(id); const L={yes:'Y',no:'N',unsure:'U'};
 function save(){try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}}
 function answer(a){const id=ITEMS[i].id;st[id]=st[id]||{};st[id].answer=a;save();if(i<ITEMS.length-1)i++;show()}
@@ -147,7 +164,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
     s = sub.add_parser('score', help='yes-rate per group with Wilson intervals')
-    s.add_argument('--session', required=True)
+    s.add_argument('--session', required=True, help='session folder, or its index.html')
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument('--verdicts', help='verdicts.csv downloaded from the page')
     g.add_argument('--code', help="answer code copied from the page ('VS<n>:...')")

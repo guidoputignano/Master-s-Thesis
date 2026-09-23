@@ -15,7 +15,7 @@ outline. Three blocks:
   covers it)?"
 
   python build_verdicts.py build --root data-mt --v2 v2_masks --analysis v2_analysis --out session
-  python build_verdicts.py score --session session --code 'VS152:YYN...'
+  python build_verdicts.py score --session session/index.html --code 'VS147:YYN...'
 
 ``key.csv`` keeps the hidden metadata (method, condition, stratum and its population
 share). ``score`` reports yes-rates with Wilson intervals and, for the cell block, the
@@ -194,7 +194,7 @@ def build(args):
 
 
 def score(args):
-    key = pd.read_csv(os.path.join(args.session, 'key.csv'))
+    key = vs.read_key(args.session)
     ver = vs.decode(args.code, len(key)) if args.code else pd.read_csv(args.verdicts, dtype=str).fillna('')
     d = key.merge(ver.rename(columns={'id': 'verdict_id'}), on='verdict_id')
     d = d[d.answer.isin(['yes', 'no'])].assign(yes=lambda x: x.answer.eq('yes'))
@@ -233,7 +233,7 @@ def main(argv=None):
     b.add_argument('--conditions', nargs='+', default=an.CONDS)
     b.add_argument('--seed', type=int, default=2026)
     s = sub.add_parser('score')
-    s.add_argument('--session', required=True)
+    s.add_argument('--session', required=True, help='session folder, or its index.html')
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument('--verdicts')
     g.add_argument('--code')
