@@ -39,11 +39,13 @@ def _data_uri(image, quality=88):
     return 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
 
 
-def write_session(items, out_dir, title='Verdict session', seed=0, embed=False):
+def write_session(items, out_dir, title='Verdict session', seed=0, embed=False, note='', quality=88):
     """``items``: dicts with 'id', 'question', 'image' (PIL) and hidden metadata. Shuffled.
 
-    With ``embed`` the crops are inlined and a compressed copy of ``key.csv`` is stored
-    in the page (never displayed), so ``index.html`` alone can be answered and scored.
+    Instead of 'image', an item may carry 'images': a list of (view name, PIL image);
+    the expert switches views with the number keys. With ``embed`` the crops are inlined
+    and a compressed copy of ``key.csv`` is stored in the page (never displayed), so
+    ``index.html`` alone can be answered and scored. ``note`` is shown above the crops.
     """
     os.makedirs(os.path.join(out_dir, 'crops'), exist_ok=True)
     order = np.random.default_rng(seed).permutation(len(items))
@@ -51,19 +53,24 @@ def write_session(items, out_dir, title='Verdict session', seed=0, embed=False):
     meta, page_items = [], []
     for k, it in enumerate(items):
         vid = f"V{k + 1:04d}"
-        if embed:
-            src = _data_uri(it['image'])
-        else:
-            it['image'].save(os.path.join(out_dir, 'crops', f"{vid}.png"))
-            src = f'crops/{vid}.png'
-        meta.append({'verdict_id': vid, **{a: b for a, b in it.items() if a != 'image'}})
-        page_items.append({'id': vid, 'q': it['question'], 'src': src})
+        views = it['images'] if 'images' in it else [('image', it['image'])]
+        srcs = []
+        for j, (_, im) in enumerate(views):
+            if embed:
+                srcs.append(_data_uri(im, quality))
+            else:
+                im.save(os.path.join(out_dir, 'crops', f"{vid}_{j + 1}.png"))
+                srcs.append(f'crops/{vid}_{j + 1}.png')
+        meta.append({'verdict_id': vid, **{a: b for a, b in it.items() if a not in ('image', 'images')}})
+        names = [n for n, _ in views]
+        page_items.append({'id': vid, 'q': it['question'], 'srcs': srcs, 'views': names,
+                           'v0': names.index(it['view0']) if it.get('view0') in names else 0})
     key_csv = pd.DataFrame(meta).to_csv(index=False)
     with open(os.path.join(out_dir, 'key.csv'), 'w') as f:
         f.write(key_csv)
     packed = base64.b64encode(zlib.compress(key_csv.encode(), 9)).decode() if embed else ''
-    page = (HTML.replace('__TITLE__', title).replace('__ITEMS__', json.dumps(page_items))
-            .replace('__STORE__', json.dumps('verdicts:' + title + ':' + str(len(meta))))
+    page = (HTML.replace('__TITLE__', title).replace('__NOTE__', note).replace('__ITEMS__', json.dumps(page_items))
+            .replace('__STORE__', json.dumps(f"verdicts:{title}:{len(meta)}:{zlib.crc32(key_csv.encode()):08x}"))
             .replace('__KEYZ__', json.dumps(packed)))
     with open(os.path.join(out_dir, 'index.html'), 'w') as f:
         f.write(page)
@@ -125,9 +132,9 @@ textarea{width:100%;box-sizing:border-box;background:var(--card);color:var(--fg)
 <p class="mut">Answer the question for the <b>outlined</b> object (right panel; the left panel is the same crop without outline;
 magenta VE-cadherin, cyan nuclei, bar 10&nbsp;&micro;m). <kbd>Y</kbd> yes &middot; <kbd>N</kbd> no &middot; <kbd>U</kbd> unsure &middot;
 <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> move. Answers are saved in this browser. At the end press <b>Copy answer code</b> and paste it
-into the chat, or <b>Download CSV</b>.</p>
+into the chat, or <b>Download CSV</b>.</p><p>__NOTE__</p>
 <div class="row"><b id="pos"></b><span id="done" class="mut"></span></div>
-<h2 id="q"></h2><img id="img" alt="crop">
+<h2 id="q"></h2><div class="row" id="views"></div><img id="img" alt="crop">
 <div class="row"><button id="y">Y &middot; yes</button><button id="n">N &middot; no</button><button id="u">U &middot; unsure</button>
 <input id="note" placeholder="optional note (CSV only)"></div>
 <div class="row"><button id="prev">&larr; previous</button><button id="next">next &rarr;</button>
@@ -136,12 +143,14 @@ into the chat, or <b>Download CSV</b>.</p>
 </main><script>
 const ITEMS=__ITEMS__, KEY=__STORE__;
 const KEYZ=__KEYZ__; let st={}; try{st=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
-let i=0; const $=id=>document.getElementById(id); const L={yes:'Y',no:'N',unsure:'U'};
+let i=0, v=0; const $=id=>document.getElementById(id); const L={yes:'Y',no:'N',unsure:'U'};
 function save(){try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}}
-function answer(a){const id=ITEMS[i].id;st[id]=st[id]||{};st[id].answer=a;save();if(i<ITEMS.length-1)i++;show()}
+function go(j){i=j;v=ITEMS[i].v0||0;show()}
+function answer(a){if(document.activeElement)document.activeElement.blur();const id=ITEMS[i].id;st[id]=st[id]||{};st[id].answer=a;save();if(i<ITEMS.length-1)go(i+1);else show()}
 function code(){return 'VS'+ITEMS.length+':'+ITEMS.map(it=>L[(st[it.id]||{}).answer]||'-').join('')}
 function show(){const it=ITEMS[i],r=st[it.id]||{};$('pos').textContent=(i+1)+' / '+ITEMS.length;
- $('q').textContent=it.q;$('img').src=it.src;for(const [b,a] of [['y','yes'],['n','no'],['u','unsure']])
+ $('q').textContent=it.q;if(v>=it.srcs.length)v=0;$('img').src=it.srcs[v];
+ $('views').innerHTML=it.views.length>1?it.views.map((n,j)=>'<button class="'+(j===v?'on':'')+'" onclick="v='+j+';show()"><kbd>'+(j+1)+'</kbd> '+n+'</button>').join(''):'';for(const [b,a] of [['y','yes'],['n','no'],['u','unsure']])
  $(b).classList.toggle('on',r.answer===a);$('note').value=r.note||'';
  $('done').textContent=' · '+Object.values(st).filter(x=>x.answer).length+' answered';$('code').value=code()}
 function csv(){const rows=[['id','answer','note']];for(const it of ITEMS){const r=st[it.id]||{};
@@ -149,13 +158,15 @@ function csv(){const rows=[['id','answer','note']];for(const it of ITEMS){const 
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.map(r=>r.map(x=>'"'+x+'"').join(',')).join('\n')],{type:'text/csv'}));
  a.download='verdicts.csv';a.click()}
 $('y').onclick=()=>answer('yes');$('n').onclick=()=>answer('no');$('u').onclick=()=>answer('unsure');
-$('prev').onclick=()=>{if(i>0){i--;show()}};$('next').onclick=()=>{if(i<ITEMS.length-1){i++;show()}};$('dl').onclick=csv;
+$('prev').onclick=()=>{if(i>0)go(i-1)};$('next').onclick=()=>{if(i<ITEMS.length-1)go(i+1)};$('dl').onclick=csv;
 $('cp').onclick=()=>{const t=$('code');t.value=code();t.select();try{navigator.clipboard.writeText(t.value)}catch(e){try{document.execCommand('copy')}catch(e2){}}};
 $('note').oninput=e=>{const id=ITEMS[i].id;st[id]=st[id]||{};st[id].note=e.target.value;save()};
-document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;const k=e.key.toLowerCase();
+document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+ if(e.repeat||e.key===' '||e.key==='Enter'){e.preventDefault();return}const k=e.key.toLowerCase();
  if(k==='y')answer('yes');else if(k==='n')answer('no');else if(k==='u')answer('unsure');
+ else if(/^[1-9]$/.test(e.key)&&+e.key<=ITEMS[i].srcs.length){v=+e.key-1;show()}
  else if(e.key==='ArrowRight')$('next').click();else if(e.key==='ArrowLeft')$('prev').click()});
-let f=ITEMS.findIndex(it=>!(st[it.id]&&st[it.id].answer));i=f<0?0:f;show();
+let f=ITEMS.findIndex(it=>!(st[it.id]&&st[it.id].answer));go(f<0?0:f);
 </script></body></html>
 """
 

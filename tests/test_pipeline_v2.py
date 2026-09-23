@@ -175,5 +175,107 @@ def test_build_verdicts_stratified_precision(tmp_path, capsys):
     code = 'VS%d:%s' % (len(key), ''.join('Y' if t else 'N' for t in key.truth))
     bv.main(['score', '--session', str(tmp_path), '--code', code])
     out = capsys.readouterr().out
-    assert 'v1: 0.90' in out and 'v2: 1.00' in out          # 0.9 * 1 + 0.1 * 0 and 0.9 * 1 + 0.1 * 1
-    assert 'v2: 0.75 of 400 um^2' in out
+    assert 'v2: 0.75' in out                                # uniform gap sample: 300 of 400 um^2 confirmed
+    d = key.assign(yes=key.truth)
+    est = {m: e for m, e, lo, hi, _ in bv.cell_precision(key, d)}
+    assert 0.8 < est['v1'] < 0.9 < est['v2']                # 0.9 * p(matched) + 0.1 * p(unmatched), Jeffreys
+
+
+def test_refine_v2_markers_growth_and_orphans():
+    rf = pytest.importorskip('refine_v2')
+    cells = np.zeros((90, 90), np.int32)
+    nuclei = np.zeros_like(cells)
+    cells[5:25, 5:25] = 1                                   # cut short: its territory runs to x = 44
+    nuclei[10:18, 10:18] = 1
+    cells[5:30, 50:80] = 2                                  # large, nucleus-free: kept
+    cells[40:44, 40:44] = 3                                 # small nucleus-free fragment: dropped
+    nuclei[60:68, 10:18] = 2                                # nucleus without a cell: new marker
+    m, info = rf.markers(cells, nuclei)
+    assert info == dict(nucleated=1, nucleus_free_kept=1, fragments_dropped=1, orphan_markers=1)
+    assert (m == 3).sum() == 0 and (m > 2).sum() == 64
+    tophat = np.zeros(cells.shape)
+    tophat[:, 45] = 100.0                                   # a junction between the left and right cells
+    tophat[35, :45] = 100.0                                 # and one below cell 1
+    raw = np.full(cells.shape, 100.0)
+    grown, gaps, sens, info = rf.refine(cells, nuclei, tophat, raw, nuclei * 50.0, 0.429)
+    assert not gaps.any() and info['covered_out'] == 1.0
+    c1 = grown[12, 12]
+    assert (grown[5:30, 5:44] == c1).mean() > 0.95          # grew to the junctions
+    assert grown[42, 42] != 0 and grown[64, 14] not in (0, c1)   # fragment absorbed, orphan has a cell
+
+
+def test_nuclear_signal_catches_missed_dim_nucleus():
+    an = pytest.importorskip('analyze')
+    nuc_img = np.full((60, 60), 10.0)
+    detected = np.zeros((60, 60), np.int32)
+    detected[5:15, 5:15] = 1
+    nuc_img[5:15, 5:15] = 200.0
+    nuc_img[40:50, 40:50] = 80.0                            # dim nucleus the model missed
+    sig = an.nuclear_signal(nuc_img, detected)
+    assert sig[40:50, 40:50].all() and not sig[25:35, 25:35].any()
+    cells = np.zeros((60, 60), np.int32)
+    cells[0:30, 0:30] = 1
+    cad = np.full((60, 60), 100.0)
+    cad[32:58, 32:58] = 5.0                                 # dark region around the missed nucleus
+    without, _ = an.dark_gaps(cells, detected, cad, 0.429)
+    with_img, _ = an.dark_gaps(cells, detected, cad, 0.429, nuc_img=nuc_img)
+    assert without[45, 45] and not with_img[45, 45]
+    assert an.area_filter(without, 0.429, 1e6).sum() == 0
+
+
+def test_round2_exclusion_uses_masks():
+    b2 = pytest.importorskip('build_verdicts2')
+    lab = np.zeros((100, 100), np.int32)
+    lab[10:20, 10:20] = 1                                   # overlaps the round-1 zone
+    lab[10:20, 40:50] = 2                                   # 6.4 um (15 px) beyond the zone edge: excluded
+    lab[70:90, 70:90] = 3                                   # far away: kept
+    zone = np.zeros(lab.shape, bool)
+    zone[5:25, 5:25] = True                                 # a round-1 object
+    zones = {KEY20: np.asarray(__import__('scipy').ndimage.distance_transform_edt(~zone)) * 0.429 <= b2.EXCLUDE_UM}
+    assert b2.excluded_labels(zones, KEY20, lab) == {1, 2}
+    assert b2.excluded_labels(zones, 'other', lab) == set()
+
+
+def test_nucleated_split_ignores_fragments():
+    an = pytest.importorskip('analyze')
+    c1 = np.zeros((40, 80), np.int32)
+    c1[:, :40] = 1                                          # v1 cell with two nuclei
+    c1[:, 40:] = 2
+    n1 = np.zeros_like(c1)
+    n1[10:15, 5:10], n1[10:15, 25:30], n1[10:15, 50:55] = 1, 2, 3
+    c2 = np.zeros_like(c1)
+    c2[:, :20], c2[:, 20:40] = 1, 2                         # v2 splits cell 1 into two nucleated cells
+    c2[:, 40:78], c2[:, 78:] = 3, 4                         # and cuts a nucleus-free sliver off cell 2
+    n2 = n1.copy()
+    split, merge = an.nucleated_split_merge(c1, n1, c2, n2)
+    assert split == 1 and merge == 0
+    g, p, inter, ga, pa = __import__('seg_eval').overlap(c1, c2)
+    assert __import__('seg_eval').split_merge(inter, ga, pa)[0].sum() == 2      # the plain count includes the sliver
+
+
+def test_minority_constraint_and_small_cell_tail():
+    rng = np.random.default_rng(7)
+    x = np.concatenate([rng.normal(np.log(500), 0.4, 5000), rng.normal(np.log(120), 0.4, 150)])   # small-cell tail
+    f = sn.fit(x)
+    assert f['frac_enlarged'] <= 0.5                        # the enlarged label never goes to the majority
+    assert f['bic1'] - f['bic2_any'] > 10 > f['bic1'] - f['bic2']      # a tail is supported, an enlarged minority is not
+    free = sn.fit(x, max_frac=1.0)
+    assert free['frac_enlarged'] > 0.9                      # unconstrained: "enlarged" = the main population
+
+
+def test_scoring_post_stratified_and_pps():
+    bv = pytest.importorskip('build_verdicts')
+    rows = []
+    for folder, n_pop, yes in (('A', 900, [1, 1, 1, 1]), ('B', 100, [0, 0, 0, 0])):
+        rows += [dict(block='cell', method='m', folder=folder, stratum='matched', stratum_n=n_pop, yes=bool(y)) for y in yes]
+    rows.append(dict(block='cell', method='m', folder='C', stratum='matched', stratum_n=5000, yes=np.nan))   # no answer
+    key = pd.DataFrame(rows)
+    d = key.dropna(subset=['yes']).assign(yes=lambda t: t.yes.astype(bool))
+    (_, est, lo, hi, used), = bv.cell_precision(key, d, by=('folder', 'stratum'))
+    assert used == 2 and 0.8 < est < 0.9 and lo < est < hi              # 0.9 * p_A + 0.1 * p_B, C dropped
+    gaps = pd.DataFrame([dict(block='gap', method='m', folder='A', sampling='pps', mult=3, folder_area=1e5, yes=True,
+                              area_um2=1e4),
+                         dict(block='gap', method='m', folder='B', sampling='pps', mult=3, folder_area=400.0, yes=False,
+                              area_um2=100.0)])
+    (_, est, lo, hi, n), = bv.gap_area_precision(gaps, gaps)
+    assert est > 0.8 and n == 6                              # area share, not the 0.5 item share

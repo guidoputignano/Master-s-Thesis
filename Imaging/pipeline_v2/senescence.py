@@ -36,7 +36,8 @@ def _norm_logpdf(x, mu, var):
     return -0.5 * (np.log(2 * np.pi * var) + (x - mu) ** 2 / var)
 
 
-STARTS = [(q0, q1, w) for q0, q1 in ((0.4, 0.9), (0.3, 0.8), (0.5, 0.95), (0.2, 0.7)) for w in (0.1, 0.25, 0.5)]
+STARTS = ([(q0, q1, w) for q0, q1 in ((0.4, 0.9), (0.3, 0.8), (0.5, 0.95), (0.2, 0.7)) for w in (0.1, 0.25, 0.5)]
+          + [(0.02, 0.55, 0.97), (0.05, 0.6, 0.9)])      # small-cell tail: only feeds bic2_any
 WARM_STARTS = [(0.4, 0.9, 0.25), (0.2, 0.7, 0.5)]      # added to a warm start (bootstrap)
 
 
@@ -67,14 +68,18 @@ def _em(x, mu1, mu2, var1, var2, w2, fixed_log_ratio, equal_var, n_iter, tol):
     return ll, mu1, mu2, var1, var2, w2
 
 
-def fit(x, fixed_log_ratio=None, equal_var=True, n_iter=1000, tol=1e-9, init=None):
+def fit(x, fixed_log_ratio=None, equal_var=True, n_iter=1000, tol=1e-9, init=None, max_frac=0.5):
     """Two-component 1-D Gaussian mixture on ``x`` (log areas) by EM, best of several starts.
 
     With ``fixed_log_ratio`` the component means differ by exactly that amount; with
-    ``equal_var`` (default) the components share one variance. ``init`` (the ``params``
-    of an earlier fit) adds a warm start and reduces the grid to two more starts, which
-    is what the bootstrap uses. Returns a dict with the enlarged fraction, median ratio,
-    BIC for one and two components and the parameters.
+    ``equal_var`` (default) the components share one variance. The enlarged component
+    (the larger mean) must hold at most ``max_frac`` of the cells: the model is a
+    normal majority plus an enlarged minority (the design has 30 % TNF-alpha cells).
+    Without that constraint the best fit can be a small-cell tail with the "enlarged"
+    label on the majority; ``bic2_any`` records the best fit without the constraint.
+    ``init`` (the ``params`` of an earlier fit) adds a warm start and reduces the grid
+    to two more starts, which is what the bootstrap uses. Returns a dict with the
+    enlarged fraction, median ratio, BIC for one and two components and the parameters.
     """
     x = np.asarray(x, float)
     x = x[np.isfinite(x)]
@@ -89,14 +94,19 @@ def fit(x, fixed_log_ratio=None, equal_var=True, n_iter=1000, tol=1e-9, init=Non
     if init is not None:
         mu1, var1, mu2, var2, w2 = init
         starts.insert(0, (mu1, mu2, var1, var2, w2))
-    best = None
+    best = best_any = None
     for mu1, mu2, var1, var2, w in starts:
         res = _em(x, mu1, mu2, var1, var2, w, fixed_log_ratio, equal_var, n_iter, tol)
-        if best is None or res[0] > best[0] + 1e-9:
+        ll_, m1, m2, v1, v2, w2 = res
+        if m2 < m1:                   # orient: component 2 = enlarged
+            res = (ll_, m2, m1, v2, v1, 1 - w2)
+        if best_any is None or res[0] > best_any[0] + 1e-9:
+            best_any = res
+        if res[5] <= max_frac and (best is None or res[0] > best[0] + 1e-9):
             best = res
+    if best is None:                  # no minority solution found: report the best one
+        best = best_any
     ll, mu1, mu2, var1, var2, w2 = best
-    if mu2 < mu1:                     # keep component 2 = enlarged
-        mu1, mu2, var1, var2, w2 = mu2, mu1, var2, var1, 1 - w2
     ll1 = float(_norm_logpdf(x, x.mean(), x.var()).sum())
     k2 = 5 - (fixed_log_ratio is not None) - bool(equal_var)
     return dict(n=n, frac_enlarged=w2, median_ratio=float(np.exp(mu2 - mu1)),
@@ -104,7 +114,7 @@ def fit(x, fixed_log_ratio=None, equal_var=True, n_iter=1000, tol=1e-9, init=Non
                 median_small=float(np.exp(mu1)), median_large=float(np.exp(mu2)),
                 sd_small=float(np.sqrt(var1)), sd_large=float(np.sqrt(var2)),
                 loglik=ll, bic1=-2 * ll1 + 2 * np.log(n), bic2=-2 * ll + k2 * np.log(n),
-                params=(mu1, var1, mu2, var2, w2))
+                bic2_any=-2 * best_any[0] + k2 * np.log(n), params=(mu1, var1, mu2, var2, w2))
 
 
 def posterior(x, params):
@@ -116,23 +126,25 @@ def posterior(x, params):
 
 
 def summarise(cells, group='condition', value='area_um2', field='key', n_boot=300, seed=0,
-              fixed_log_ratio=None, equal_var=True):
+              fixed_log_ratio=None, equal_var=True, max_frac=0.5):
     """Per-group mixture fit with field-level bootstrap CIs. ``cells`` needs ``value``, ``field``."""
     rng = np.random.default_rng(seed)
     out = []
     for g, d in cells.groupby(group):
         x = np.log(d[value].to_numpy())
-        f = fit(x, fixed_log_ratio, equal_var)
+        f = fit(x, fixed_log_ratio, equal_var, max_frac=max_frac)
         fields = d[field].unique()
         by_field = {k: np.log(v[value].to_numpy()) for k, v in d.groupby(field)}
         boots = []
         for _ in range(n_boot):
             pick = rng.choice(fields, len(fields), replace=True)
-            b = fit(np.concatenate([by_field[k] for k in pick]), fixed_log_ratio, equal_var, init=f['params'])
+            b = fit(np.concatenate([by_field[k] for k in pick]), fixed_log_ratio, equal_var, init=f['params'],
+                    max_frac=max_frac)
             boots.append((b.get('frac_enlarged', np.nan), b.get('median_ratio', np.nan)))
         boots = np.array(boots)
         lo, hi = np.nanpercentile(boots, [2.5, 97.5], axis=0)
         out.append(dict(group=g, n_cells=f['n'], n_fields=len(fields), delta_bic=f['bic1'] - f['bic2'],
+                        delta_bic_any=f['bic1'] - f['bic2_any'],
                         frac_enlarged=f['frac_enlarged'], frac_lo=lo[0], frac_hi=hi[0],
                         median_ratio=f['median_ratio'], ratio_lo=lo[1], ratio_hi=hi[1],
                         median_small=f['median_small'], median_large=f['median_large'],

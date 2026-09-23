@@ -43,11 +43,16 @@ V1_HOLES = {'Static-x20': ('Holes', '*regional_segmented.tif'), 'Static-x40': ('
 # where 'Nuclei' is a copy of 'Nuclei_raw' and the seeds came from 'Nuclei_filtered'.
 V1_NUCLEI = {'Static-x20': 'Nuclei', 'Static-x40': 'Nuclei', '1.4Pa-x20': 'Nuclei', '1.4Pa-x40': 'Nuclei_filtered'}
 DUPLICATE = re.compile(r'\s?\(\d+\)')   # 'seq001 (1).tif', 'tophat(1).tif': copies of a field
-GAP_MIN_UM2 = 10.0      # smallest gap counted (both methods, for the comparison)
-GAP_OPEN_UM = 1.0       # opening radius that removes the thin unlabelled lines between cells
+GAP_MIN_UM2 = 10.0      # smallest gap counted (fixed before any review; 25 and 50 um^2 reported as sensitivity)
+GAP_OPEN_UM = 0.858     # opening radius: exactly 2 px at 20x and 4 px at 40x (removes inter-cell lines)
 GAP_DARK_PCT = 1.0      # gap pixels are darker than all but this % of cell interiors (per field)
 GAP_SMOOTH_UM = 1.0     # Gaussian smoothing of the VE-cadherin projection before the darkness test
 CORE_UM = 2.0           # cell interior = farther than this from any cell boundary
+
+
+def segment_inputs(root, cond):
+    import segment_v2                       # late import: segment_v2 imports this module's neighbours
+    return segment_v2.inputs(root, cond)
 
 
 def index(folder, pattern='*.tif'):
@@ -81,13 +86,35 @@ def interior_level(img, cells, um):
     return np.asarray(ndimage.median(img, labels=core, index=ids)) if len(ids) else np.array([])
 
 
-def dark_gaps(cells, nuclei, cad, um, pct=GAP_DARK_PCT):
+def nuclear_signal(nuc_img, nuclei):
+    """Pixels with nuclear stain: brighter than a quarter of the way from the background
+    (outside detected nuclei) to the level inside detected nuclei. Catches dim nuclei the
+    nuclei model missed."""
+    img = np.asarray(nuc_img, float)
+    inside = nuclei > 0
+    if not inside.any():
+        return np.zeros(img.shape, bool)
+    bg = np.median(img[~ndimage.binary_dilation(inside, iterations=3)])
+    return img > bg + 0.25 * (np.median(img[inside]) - bg)
+
+
+def area_filter(mask, um, min_um2):
+    lab = cc_label(mask, connectivity=2)
+    if not lab.max():
+        return mask
+    keep = np.bincount(lab.ravel()) * um ** 2 >= min_um2
+    keep[0] = False
+    return keep[lab]
+
+
+def dark_gaps(cells, nuclei, cad, um, pct=GAP_DARK_PCT, nuc_img=None, min_um2=GAP_MIN_UM2):
     """v2 gaps: darker than cell cytoplasm, not inside a nucleated cell, no nucleus inside.
 
     ``cad`` is the VE-cadherin projection without top-hat (the top-hat removes the
     diffuse cytoplasmic signal that separates a cell interior from bare substrate).
     The threshold is the ``pct`` percentile of the per-cell interior medians of the
-    same field. Returns the gap mask and the threshold.
+    same field. A component is rejected if more than 5 % of it is a detected nucleus
+    or, when ``nuc_img`` is given, nuclear stain. Returns the gap mask and the threshold.
     """
     smooth = ndimage.gaussian_filter(np.asarray(cad, float), GAP_SMOOTH_UM / um)
     level = interior_level(smooth, cells, um)
@@ -101,16 +128,55 @@ def dark_gaps(cells, nuclei, cad, um, pct=GAP_DARK_PCT):
     if not lab.max():
         return cand, thr
     area = np.bincount(lab.ravel()) * um ** 2
-    nuc = np.bincount(lab.ravel(), weights=(nuclei > 0).ravel(), minlength=len(area)) * um ** 2
-    keep = (area >= GAP_MIN_UM2) & (nuc <= 0.05 * area)
+    nuclear = nuclei > 0
+    if nuc_img is not None:
+        nuclear = nuclear | nuclear_signal(nuc_img, nuclei)
+    nuc = np.bincount(lab.ravel(), weights=nuclear.ravel(), minlength=len(area)) * um ** 2
+    keep = (area >= min_um2) & (nuc <= 0.05 * area)
     keep[0] = False
     return keep[lab], thr
 
 
+def gap_quality(h1, h2, cad, nuc_img, nuclei, cells, um):
+    """Method-agnostic checks of gap masks: VE-cadherin intensity inside the gaps relative
+    to the median cell interior (bare substrate should sit far below 1), and the share of
+    gap pixels carrying nuclear stain (should be ~0)."""
+    smooth = ndimage.gaussian_filter(np.asarray(cad, float), GAP_SMOOTH_UM / um)
+    level = np.median(interior_level(smooth, cells, um)) if cells.any() else np.nan
+    nuc = nuclei > 0                          # same definition of "nuclear" as dark_gaps
+    if nuc_img is not None:
+        nuc = nuc | nuclear_signal(nuc_img, nuclei)
+    out = {}
+    for tag, h in (('v1', h1), ('v2', h2)):
+        out[f'{tag}_gap_rel_intensity'] = float(np.median(smooth[h]) / level) if h.any() else np.nan
+        out[f'{tag}_gap_nuclear_frac'] = float(nuc[h].mean()) if h.any() else np.nan
+    return out
+
+
 def orphan_fraction(cells, nuclei):
-    """Share of nuclei with no cell covering more than half of them."""
+    """Share of nuclei with no cell covering more than half of them. The analysis uses
+    the v2 nuclei for both methods, as a common reference."""
     owner, n_ids, _ = ft.nuclei_assignment(cells, nuclei)
     return 1 - len(owner) / len(n_ids) if len(n_ids) else np.nan
+
+
+def nucleated_split_merge(c1, n1, c2, n2):
+    """Splits and merges that involve only nucleated cells.
+
+    A v1 cell counts as split when at least two *nucleated* v2 cells have more than half
+    of their area inside it (fragments without a nucleus do not count). A v2 cell counts
+    as merging v1 cells when at least two nucleated v1 cells lie mostly inside it.
+    """
+    g, p, inter, ga, pa = se.overlap(c1, c2)
+    nuc1 = np.isin(g, list(set(ft.nuclei_assignment(c1, n1)[0].values()))) if n1 is not None else np.ones(len(g), bool)
+    nuc2 = np.isin(p, list(set(ft.nuclei_assignment(c2, n2)[0].values())))
+    split = ((inter * 2 > pa[None, :]) & nuc2[None, :]).sum(1) >= 2
+    merge = ((inter * 2 > ga[:, None]) & nuc1[:, None]).sum(0) >= 2
+    return int(split.sum()), int(merge.sum())
+
+
+def date_of(key):
+    return key.split('_')[2]          # '19dec21' / '20dec21': the two experiments
 
 
 def nematic(df, min_ar=1.3):
@@ -132,6 +198,9 @@ def run(root, v2_root, out, conds, limit=None):
         v2c = index(f'{v2_root}/{cond}', '*_v2_cells.tif')
         v2n = index(f'{v2_root}/{cond}', '*_v2_nuclei.tif')
         cad = index(f'{root}/Projection/{cond}/Cadherins/background')
+        nucimg = {k: n for k, (_, n) in segment_inputs(root, cond).items()}
+        pre = index(f'{v2_root}/{cond}', '*_v2_gaps.tif')             # written by refine_v2.py
+        pre_sens = index(f'{v2_root}/{cond}', '*_v2_gaps_sens.tif')
         keys = sorted(set(v1c) & set(v2c) & set(v2n) & set(cad))[:limit]
         os.makedirs(f'{out}/v2_gaps/{cond}', exist_ok=True)
         for k in keys:
@@ -141,9 +210,17 @@ def run(root, v2_root, out, conds, limit=None):
             n2 = tifffile.imread(v2n[k])
             img = tifffile.imread(cad[k])
             h1 = tifffile.imread(v1h[k]) > 0 if k in v1h else np.zeros_like(c1, bool)
-            h2, thr = dark_gaps(c2, n2, img, um)
+            nimg = tifffile.imread(nucimg[k]) if k in nucimg else None
+            if k in pre:
+                h2, thr = tifffile.imread(pre[k]) > 0, np.nan
+                sv = tifffile.imread(pre_sens[k]) if k in pre_sens else np.zeros(h2.shape, np.uint8)
+                sens = {'v2_gap_frac_p0.5': ((sv & 2) > 0).mean(), 'v2_gap_frac_p5': ((sv & 4) > 0).mean()}
+            else:
+                h2, thr = dark_gaps(c2, n2, img, um, nuc_img=nimg)
+                sens = {f'v2_gap_frac_p{p:g}': dark_gaps(c2, n2, img, um, p, nimg)[0].mean() for p in (0.5, 5.0)}
+            sens.update({f'v2_gap_frac_min{a:g}': area_filter(h2, um, a).mean() for a in (25.0, 50.0)})
+            sens.update({f'v1_gap_frac_min{a:g}': area_filter(h1, um, a).mean() for a in (10.0, 25.0, 50.0)})
             tifffile.imwrite(f'{out}/v2_gaps/{cond}/{k}_v2_gaps.tif', h2.astype(np.uint8), compression='zlib')
-            sens = {f'v2_gap_frac_p{p:g}': dark_gaps(c2, n2, img, um, p)[0].mean() for p in (0.5, 5.0)}
             f1 = ft.cell_features(c1, k, n1, h1)
             f2 = ft.cell_features(c2, k, n2, h2)
             f1['method'], f2['method'] = 'v1', 'v2'
@@ -153,20 +230,23 @@ def run(root, v2_root, out, conds, limit=None):
             iou = se.iou_matrix(inter, ga, pa)
             r, c = se.match(iou, 0.5)
             spl, mrg, _ = se.split_merge(inter, ga, pa)      # 'gt' = v1 here
+            spl_n, mrg_n = nucleated_split_merge(c1, n1, c2, n2)
             fov = (c1.shape[0] * um / 1000) * (c1.shape[1] * um / 1000)
             s1, a1 = nematic(f1)
             s2, a2 = nematic(f2)
-            fields.append(dict(key=k, condition=se.condition_of(k), folder=cond, fov_mm2=fov,
+            fields.append(dict(key=k, condition=se.condition_of(k), folder=cond, date=date_of(k), fov_mm2=fov,
                                v1_cells=len(f1), v2_cells=len(f2),
                                v1_density=len(f1) / fov, v2_density=len(f2) / fov,
                                v1_gap_frac=h1.mean(), v2_gap_frac=h2.mean(), **sens, v2_gap_threshold=thr,
                                v2_uncovered_frac=gaps_from_cells(c2, um).mean(),
                                gap_iou=(h1 & h2).sum() / max(1, (h1 | h2).sum()),
+                               **gap_quality(h1, h2, img, nimg, n2, c2, um),
                                v1_orphan_nuclei=orphan_fraction(c1, n2), v2_orphan_nuclei=orphan_fraction(c2, n2),
                                v1_S=s1, v2_S=s2, v1_axis=a1, v2_axis=a2))
             agree.append(dict(key=k, condition=se.condition_of(k), v1=len(g), v2=len(p), matched=len(r),
                               median_iou=float(np.median(iou[r, c])) if len(r) else np.nan,
-                              v1_split_by_v2=int(spl.sum()), v2_merging_v1=int(mrg.sum())))
+                              v1_split_by_v2=int(spl.sum()), v2_merging_v1=int(mrg.sum()),
+                              v1_split_nucleated=spl_n, v2_merging_nucleated=mrg_n))
             print(f"{cond} {k}: v1 {len(f1)} v2 {len(f2)} matched {len(r)}", flush=True)
     cells1, cells2 = pd.concat(all1, ignore_index=True), pd.concat(all2, ignore_index=True)
     cells1.to_csv(f'{out}/cells_v1.csv', index=False)
@@ -215,9 +295,26 @@ def magnification_table(cells, fields, mixture):
     return pd.DataFrame(rows)
 
 
+def by_date(c1, c2, fields):
+    """Per method x condition x date: morphology, gaps and the enlarged-minority fit."""
+    rows = []
+    for tag, cells in (('v1', c1), ('v2', c2)):
+        cells = cells.assign(date=cells.key.map(date_of))
+        for (cond, date), d in cells.groupby(['condition', 'date']):
+            inner, f = d[~d.touches_border], fields[(fields.condition == cond) & (fields.date == date)]
+            fit = sn.fit(np.log(mixture_cells(d).area_um2.to_numpy()))
+            rows.append(dict(method=tag, condition=cond, date=date, fields=d.key.nunique(),
+                             density=f[f'{tag}_density'].mean(), area_median=inner.area_um2.median(),
+                             AR_mean=inner.aspect_ratio.mean(), misalign_mean=inner.misalign_deg.mean(),
+                             gap_pct=100 * f[f'{tag}_gap_frac'].mean(),
+                             enlarged_frac=fit.get('frac_enlarged', np.nan),
+                             ratio=fit.get('median_ratio', np.nan), delta_bic=fit.get('bic1', np.nan) - fit.get('bic2', np.nan)))
+    return pd.DataFrame(rows)
+
+
 def _summarise(task):
-    d, ratio, equal, tag, name = task
-    return sn.summarise(d, fixed_log_ratio=ratio, equal_var=equal).assign(method=tag, model=name)
+    d, ratio, equal, tag, name, max_frac = task
+    return sn.summarise(d, fixed_log_ratio=ratio, equal_var=equal, max_frac=max_frac).assign(method=tag, model=name)
 
 
 def mixture_cells(cells):
@@ -278,22 +375,32 @@ def main(argv=None):
     lines = ['# v1 vs v2 on the same fields\n']
     tab = pd.concat([describe(c1, fdf, 'v1'), describe(c2, fdf, 'v2')]).sort_values(['condition', 'method'])
     lines += ['## Per condition (interior cells unless noted)\n', md_table(tab.round(2).set_index('method'))]
-    a = adf.groupby('condition')[['v1', 'v2', 'matched', 'v1_split_by_v2', 'v2_merging_v1']].sum()
+    a = adf.groupby('condition')[['v1', 'v2', 'matched', 'v1_split_by_v2', 'v2_merging_v1',
+                                  'v1_split_nucleated', 'v2_merging_nucleated']].sum()
     a['matched_pct_of_v1'] = 100 * a.matched / a.v1
-    lines += ['\n## Agreement (v1 cells matched by a v2 cell at IoU >= 0.5)\n', a.round(1).to_string()]
-    models = (('free ratio', None, True), ('Chala ratio 2.27', np.log(sn.CHALA_RATIO), True),
-              ('free ratio, unequal variances (not used)', None, False))
-    tasks = [(g[['key', 'condition', 'area_um2']], ratio, equal, tag, name)
+    a['split_pct'] = 100 * a.v1_split_by_v2 / a.v1
+    a['split_nucleated_pct'] = 100 * a.v1_split_nucleated / a.v1
+    a['merge_nucleated_pct'] = 100 * a.v2_merging_nucleated / a.v2
+    lines += ['\n## Agreement (all cells, border included; v1 cells matched by a v2 cell at IoU >= 0.5)\n',
+              'split / merge: majority-overlap counts; the *_nucleated columns count only nucleated cells, '
+              'so nucleus-free fragments do not make a split.\n', a.round(1).to_string()]
+    lines += ['\n## By experiment date (the two A1 experiments)\n', md_table(by_date(c1, c2, fdf).round(3).set_index('method'))]
+    models = (('free ratio', None, True, 0.5), ('Chala ratio 2.27', np.log(sn.CHALA_RATIO), True, 0.5),
+              ('free ratio, unequal variances, unconstrained (not used)', None, False, 1.0))
+    tasks = [(g[['key', 'condition', 'area_um2']], ratio, equal, tag, name, max_frac)
              for tag, cells in (('v1', c1), ('v2', c2)) for _, g in mixture_cells(cells).groupby('condition')
-             for name, ratio, equal in models]
+             for name, ratio, equal, max_frac in models]
     with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
         sens = list(pool.map(_summarise, tasks))
-    order = {name: i for i, (name, _, _) in enumerate(models)}
+    order = {m[0]: i for i, m in enumerate(models)}
     sdf = pd.concat(sens).sort_values(['method', 'model', 'group'], key=lambda c: c.map(order) if c.name == 'model' else c)
     sdf.to_csv(f'{args.out}/senescence_mixture.csv', index=False)
     lines += ['\n## Senescence: two-component log-normal mixture on interior cells with >= 1 nucleus\n',
-              'Shifted-population model (shared variance). The unequal-variance fit is shown to document '
-              'why it is not used: it tends to a narrow core plus a broad component.\n',
+              'Shifted-population model (shared variance), enlarged component constrained to be the minority '
+              '(<= 50 %); delta_bic_any is the best two-component fit without that constraint (a large value '
+              'with a small delta_bic means the extra component is not an enlarged minority, e.g. a small-cell '
+              'tail). The unconstrained unequal-variance fit documents why it is not used: it tends to a narrow '
+              'core plus a broad component.\n',
               sdf.round(3).to_string(index=False)]
     mag = magnification_table(pd.concat([c1, c2], ignore_index=True), fdf, sdf)
     if len(mag):

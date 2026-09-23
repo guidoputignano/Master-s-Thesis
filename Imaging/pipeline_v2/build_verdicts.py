@@ -19,7 +19,7 @@ outline. Three blocks:
 
 ``key.csv`` keeps the hidden metadata (method, condition, stratum and its population
 share). ``score`` reports yes-rates with Wilson intervals and, for the cell block, the
-stratified precision with a bootstrap interval.
+stratified precision (Jeffreys posterior median and 95 % interval).
 """
 from __future__ import annotations
 
@@ -206,20 +206,64 @@ def score(args):
             p, lo, hi = wilson(int(g.yes.sum()), len(g))
             rows.append(dict(zip(by, g_key), n=len(g), yes_rate=p, lo=lo, hi=hi))
         print(pd.DataFrame(rows).to_string(index=False, float_format=lambda v: f"{v:.2f}") + '\n')
-    rng = np.random.default_rng(0)
-    print('\nCell precision (stratified by agreement, population shares pooled over conditions):')
-    for method, g in d[d.block == 'cell'].groupby('method'):
-        share = (key[(key.block == 'cell') & (key.method == method)]
-                 .drop_duplicates(['folder', 'stratum']).groupby('stratum').stratum_n.sum())
-        w = share / share.sum()
-        strata = {s: x.yes.to_numpy() for s, x in g.groupby('stratum')}
-        est = sum(w[s] * v.mean() for s, v in strata.items())
-        boots = [sum(w[s] * rng.choice(v, len(v)).mean() for s, v in strata.items()) for _ in range(4000)]
-        lo, hi = np.percentile(boots, [2.5, 97.5])
-        print(f"  {method}: {est:.2f} [{lo:.2f}, {hi:.2f}]  (weights {dict(w.round(3))})")
-    print('\nGap area confirmed (answers weighted by component area):')
+    print('\nCell precision: each stratum weighted by its share of the method\'s interior cells; posterior')
+    print('median and 95 % interval from Jeffreys Beta draws per stratum (strata without answers dropped):')
+    for by, label in ((('stratum',), 'agreement strata, conditions pooled'),
+                      (('folder', 'stratum'), 'condition x agreement strata (sensitivity)')):
+        for method, est, lo, hi, used in cell_precision(key, d, by=by):
+            print(f"  {method}: {est:.3f} [{lo:.3f}, {hi:.3f}]  ({label}; {used} strata)")
+    print('\nGap area confirmed:')
+    for method, est, lo, hi, n in gap_area_precision(key, d):
+        print(f"  {method}: {est:.2f} [{lo:.2f}, {hi:.2f}]  (n={n})")
+
+
+def cell_precision(key, d, block='cell', by=('stratum',), n_draw=20000, seed=0):
+    """Stratified precision per method: sum over strata of W * p, W the stratum's share of
+    the method's interior cells (population counts from the key), p ~ Beta(k + 1/2, n - k + 1/2)
+    (Jeffreys). Returns the posterior median and 95 % interval; strata without yes/no answers
+    are dropped and the weights renormalised."""
+    rng = np.random.default_rng(seed)
+    by = list(by)
+    out = []
+    for method, g in d[d.block == block].groupby('method'):
+        pop = (key[(key.block == block) & (key.method == method)]
+               .drop_duplicates(['folder', 'stratum']).groupby(by).stratum_n.sum())
+        cells = g.groupby(by).yes.agg(['sum', 'count'])
+        cells = cells[cells['count'] > 0]
+        w = pop.reindex(cells.index).astype(float).to_numpy()
+        w = w / w.sum()
+        k, n = cells['sum'].to_numpy(float), cells['count'].to_numpy(float)
+        draws = rng.beta(k + 0.5, n - k + 0.5, size=(n_draw, len(k))) @ w
+        lo, med, hi = np.percentile(draws, [2.5, 50, 97.5])
+        out.append((method, float(med), float(lo), float(hi), len(k)))
+    return out
+
+
+def gap_area_precision(key, d, n_draw=20000, seed=0):
+    """Share of gap area confirmed. Uniform samples: answers weighted by component area.
+    Area-proportional samples drawn with replacement ('mult' = times drawn): the yes-rate
+    within a folder estimates that folder's confirmed area share, and folders are combined
+    with weights equal to their total gap area ('folder_area')."""
+    rng = np.random.default_rng(seed)
+    out = []
     for method, g in d[d.block == 'gap'].groupby('method'):
-        print(f"  {method}: {(g.yes * g.area_um2).sum() / g.area_um2.sum():.2f} of {g.area_um2.sum():.0f} um^2")
+        if 'sampling' in g and g.sampling.eq('pps').all():
+            mult = g['mult'].fillna(1).astype(float) if 'mult' in g else pd.Series(1.0, index=g.index)
+            parts = []
+            for folder, x in g.assign(mult=mult).groupby('folder'):
+                k, n = float((x.yes * x.mult).sum()), float(x.mult.sum())
+                parts.append((float(x.folder_area.iloc[0]), k, n))
+            w = np.array([a for a, _, _ in parts])
+            w = w / w.sum()
+            k = np.array([p[1] for p in parts])
+            n = np.array([p[2] for p in parts])
+            draws = rng.beta(k + 0.5, n - k + 0.5, size=(n_draw, len(k))) @ w
+            lo, est, hi = np.percentile(draws, [2.5, 50, 97.5])
+            out.append((method, float(est), float(lo), float(hi), int(n.sum())))
+        else:
+            est = float((g.yes * g.area_um2).sum() / g.area_um2.sum())
+            out.append((method, est, np.nan, np.nan, len(g)))
+    return out
 
 
 def main(argv=None):

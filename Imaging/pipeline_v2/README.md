@@ -4,6 +4,15 @@ A second segmentation and senescence analysis that runs next to the original
 notebooks (called **v1** here), with the same inputs and the same per-cell
 features. The two can be compared field by field.
 
+There are two variants:
+
+- **v2** (`segment_v2.py`) is Cellpose alone.
+- **v2.1** (`refine_v2.py`) is v2 corrected after the first blind review.
+  Cellpose often outlines only the part of a cell around the nucleus when
+  junctions are faint, so v2.1 grows each Cellpose cell over the VE-cadherin
+  landscape to its junctions. It drops nucleus-free fragments and gives every
+  nucleus without a cell its own marker.
+
 > **Data handling.** This repository is public and the images are
 > access-restricted (see `data/Costanza/README.md`). Never commit images,
 > masks, verdict sessions or per-cell tables here. Write them to a private
@@ -15,7 +24,7 @@ features. The two can be compared field by field.
 |---|---|---|
 | Nuclei | Cellpose `cyto3` on the nuclear channel (d = 30 px), intensity/area filter | Cellpose `nuclei`, d = 11.2 µm (26 px at 20x, 52 px at 40x); nuclear top-hat at 20x, projection without top-hat at 40x (the top-hat hollows 40x nuclei) |
 | Whole cells | one watershed region per nuclear seed on the VE-cadherin gradient; seeds merged by a corridor test with per-condition distances (2–25 px) | Cellpose `cyto3` on VE-cadherin + nuclei, d = 25.7 µm (60 px at 20x, 120 px at 40x) |
-| Holes / gaps | histogram-valley threshold, per-folder gating and manual overrides; watershed barrier only at 1.4 Pa | darker than all but 1 % of the field's cell interiors (VE-cadherin without top-hat, σ = 1 µm), outside nucleated cells, opened with r = 1 µm, >= 10 µm², no nucleus inside; uncovered area reported separately |
+| Holes / gaps | histogram-valley threshold, per-folder gating and manual overrides; watershed barrier only at 1.4 Pa | darker than all but 1 % of the field's cell interiors (VE-cadherin without top-hat, σ = 1 µm), outside nucleated cells, opened with r = 0.86 µm (2 px at 20x, 4 px at 40x), >= 10 µm², at most 5 % nuclear pixels; uncovered area reported separately |
 | Parameters | per condition, some per field | one setting for every condition, in micrometres |
 | Units | pixels (x40 areas divided by 4) | µm, 0.429 µm/px at 20x and 0.2145 µm/px at 40x |
 | Border cells | kept in all statistics | flagged; excluded from morphology and senescence estimates |
@@ -58,8 +67,12 @@ component (weight 0.7–0.8, ratio 1.2–1.9), which describes skewness rather
 than a second population. `senescence.py` fits the shifted-population model
 by EM from several starting points, either with a free ratio or with the
 ratio fixed at 2.27. With a shared variance the ratio of medians equals the
-ratio of means, which is what Chala reports. It compares one versus two
-components by BIC and bootstraps whole fields for the intervals. Each cell
+ratio of means, which is what Chala reports. The enlarged component must also
+be the minority (<= 50 % of cells). Without that constraint the best fit under
+flow can be a small-cell tail with the "enlarged" label on the majority. The
+best unconstrained fit is still reported (`delta_bic_any`). The model
+compares one versus two components by BIC and bootstraps whole fields for the
+intervals. Each cell
 gets a posterior probability of belonging to the enlarged component.
 Hand-set gates and k-means are no longer needed; k-means always returns two
 clusters, whether or not two populations exist. The mixture weight is the
@@ -76,7 +89,9 @@ single cells.
 pip install cellpose==3.1.1.1 tifffile scikit-image pandas scipy pillow
 # 1. segmentation (CPU: ~30 s per 20x field; --gpu if available)
 python segment_v2.py --root /path/to/data-mt --out /private/v2_masks
-# 2. per-cell features for v1 and v2, agreement, gaps, alignment, mixture fits
+# 1b. v2.1: grow the Cellpose cells to their junctions (seconds per field)
+python refine_v2.py --root /path/to/data-mt --v2 /private/v2_masks --out /private/v2r_masks
+# 2. per-cell features for v1 and v2 (or v2.1: --v2 /private/v2r_masks), agreement, gaps, alignment, mixtures
 python analyze.py --root /path/to/data-mt --v2 /private/v2_masks --out /private/v2_analysis
 # 3. blind yes/no session (one self-contained HTML file) and its scoring
 python build_verdicts.py build --root /path/to/data-mt --v2 /private/v2_masks \
@@ -103,11 +118,25 @@ agreement between the reported rule-based calls and the mixture.
 
 - **cell**: interior cells of each method, stratified by whether the other
   method finds the same cell (IoU >= 0.5). The question is "exactly one whole
-  cell?", and the stratified yes-rate is the cell precision.
+  cell?". The stratified estimate (Jeffreys posterior per stratum, weighted
+  by the stratum's population share) is the cell precision.
 - **enlarged**: v1 cells reported as senescent, and v2 cells in the enlarged
   component. The question is the same.
 - **gap**: gap components of each method. The question is "a gap in the
-  monolayer?". Scoring also weights the answers by component area.
+  monolayer?". Scoring also weights the answers by component area. In round
+  2 the components are drawn with replacement in proportion to area, and
+  conditions are combined by gap area.
+
+`build_verdicts2.py` builds round 2 (v1 vs v2.1) on objects never shown
+before, with anything within 10 µm of a round-1 object excluded:
+
+- cells, stratified as above;
+- multinucleated cells;
+- v2.1 enlarged cells;
+- gaps sampled in proportion to their area.
+
+Each crop has three views: junctions, "haze" (VE-cadherin without top-hat,
+where cytoplasm is grey and bare substrate black) and Golgi.
 
 The page (`index.html`, crops embedded) is answered with Y/N/U. The answers
 come back as a short code (`VS<n>:YYNU...`) or a CSV. `verdict_session.py`
