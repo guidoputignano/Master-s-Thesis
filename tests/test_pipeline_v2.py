@@ -414,3 +414,38 @@ def test_export_flags_objective_that_does_not_match_the_file_name(tmp_path, monk
     found, have = ex.pixel_sizes(str(tmp_path))
     assert have and 'does not match' in found['A1_40x']['note'] and 'note' not in found['A1_20x']
     assert 'does not match' in capsys.readouterr().err
+
+
+def test_golgi_polarity_direction_border_cells_and_offset():
+    po = pytest.importorskip('polarity')
+    rng = np.random.default_rng(2)
+    cells = np.zeros((200, 200), np.int32)
+    nuclei = np.zeros_like(cells)
+    golgi = rng.uniform(1, 5, cells.shape)
+    yy, xx = np.mgrid[:200, :200]
+    lab = 0
+    for i in range(5):
+        for j in range(5):                        # 5 x 5 cells of 40 px; the outer ring touches the border
+            lab += 1
+            cy, cx = 40 * i + 20, 40 * j + 20
+            cells[40 * i:40 * i + 40, 40 * j:40 * j + 40] = lab
+            nuclei[(yy - cy) ** 2 + (xx - cx) ** 2 <= 6 ** 2] = lab
+            golgi[(yy - cy) ** 2 + (xx - cx + 10) ** 2 <= 3 ** 2] = 100.0     # 10 px left of the nucleus
+    v = po.golgi_vectors(cells, nuclei, golgi, 0.5)
+    assert len(v) == 9                            # interior cells only
+    assert np.allclose(v.dx_um, -5.0, atol=0.3) and np.allclose(v.dy_um, 0.0, atol=0.3)
+    n, r, ang, p = po.mean_direction(v.dx_um, v.dy_um)
+    assert r > 0.99 and abs(ang - 180) < 2 and p < 1e-3
+    n, r, ang, p = po.mean_direction(*np.split(rng.normal(0, 1, 800), 2))    # no preferred side
+    assert r < 0.15 and p > 0.01
+    # a channel offset seen on the static slide is removed before the flow slide is summarised
+    phi = rng.uniform(0, 2 * np.pi, 600)
+    static = pd.DataFrame(dict(dx_um=4 * np.cos(phi) - 1.0, dy_um=4 * np.sin(phi)))
+    flow = pd.DataFrame(dict(dx_um=4 * np.cos(phi[:300]) - 1.0, dy_um=4 * np.sin(phi[:300])))
+    flow.loc[:149, 'dx_um'] = -4.0 - 1.0
+    flow.loc[:149, 'dy_um'] = 0.0
+    cells_df = pd.concat([static.assign(condition='0Pa_A1_20x'), flow.assign(condition='1.4Pa_A1_20x')])
+    s = po.summarise(cells_df.assign(date='19dec21')).set_index('condition')
+    assert s.loc['0Pa_A1_20x', 'R'] > 0.1 and s.loc['0Pa_A1_20x', 'R_corrected'] < 0.5 * s.loc['0Pa_A1_20x', 'R']
+    assert s.loc['1.4Pa_A1_20x', 'R_corrected'] > 0.4
+    assert abs(s.loc['1.4Pa_A1_20x', 'direction_corrected_deg'] - 180) < 10

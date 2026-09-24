@@ -78,6 +78,17 @@ leaves out answers from low-quality fields only, because repeated fields are
 clear images. It rescales each condition × stratum population to the fields
 that remain; `build_verdicts.py strata` writes those counts.
 
+**Flow direction** (`polarity.py`). The A1 file names carry "L2RA": left to
+right was assumed when the files were renamed, not recorded. Under laminar
+flow endothelial cells move the Golgi upstream of the nucleus, and Chala et
+al. (2021) found this in senescent monolayers too, although those did not
+align. `polarity.py` measures the nucleus-to-Golgi vector of every interior
+cell and reports, per slide and per field, the mean resultant length R
+(0 = no preferred side), its direction and the Rayleigh p-value. A channel
+offset would add the same vector to every cell, so the statistics are
+repeated after subtracting the mean vector of the static slide of the same
+experiment and magnification.
+
 **Nuclei folder in v1.** `Segmented/<c>/Nuclei` is the filtered subset of
 `Nuclei_raw` and the source of the seeds in Static-x20, Static-x40 and
 1.4Pa-x20. In 1.4Pa-x40, `Nuclei` is a copy of `Nuclei_raw` and the seeds
@@ -130,6 +141,9 @@ python quality.py --root /path/to/data-mt --v2 /private/v2r_masks --out /private
 # 2. per-cell features for v1 and v2 (or v2.1: --v2 /private/v2r_masks), agreement, gaps, alignment, mixtures
 python analyze.py --root /path/to/data-mt --v2 /private/v2_masks --out /private/v2_analysis \
     --exclude-fields /private/quality.csv
+# 2b. flow direction from the nucleus-to-Golgi vectors (v1 cells, Cellpose nuclei)
+python polarity.py --root /path/to/data-mt --v2 /private/v2r_masks --out /private/polarity \
+    --exclude-fields /private/quality.csv
 # 3. blind yes/no session (one self-contained HTML file) and its scoring
 python build_verdicts.py build --root /path/to/data-mt --v2 /private/v2_masks \
     --analysis /private/v2_analysis --out /private/verdicts
@@ -144,8 +158,8 @@ python build_verdicts.py score --session /private/verdicts/index.html --verdicts
 The data root follows the layout of the data repository:
 `Projection/<c>/{Cadherins,Nuclei}/{tophat,background}`, `Segmented/<c>/...` and
 `Senescence/<c>/Senescence_Results`, with `<c>` in Static-x20, Static-x40,
-1.4Pa-x20 and 1.4Pa-x40. flow3-x20 is a different experiment and is not
-included.
+1.4Pa-x20 and 1.4Pa-x40: the A1 experiment. flow3-x20 is not used, because
+its experimental conditions are unknown.
 
 `analyze.py` writes `cells_v1.csv`, `cells_v2.csv` and `cells_posterior.csv`
 (per cell), `fields.csv` (density, gap fraction, nematic order), `agreement.csv`

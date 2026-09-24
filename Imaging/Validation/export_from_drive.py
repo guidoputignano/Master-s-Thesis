@@ -30,7 +30,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import seg_eval as se  # noqa: E402
 
 ROOT = '/content/drive/MyDrive/knowledge/University/Master/Thesis'
-CONDITIONS = ['Static-x20', 'Static-x40', 'flow3-x20', '1.4Pa-x20', '1.4Pa-x40']
+# The A1 experiment only. flow3-x20 (series U) is not used: its experimental conditions are unknown.
+CONDITIONS = ['Static-x20', 'Static-x40', '1.4Pa-x20', '1.4Pa-x40']
 
 ALL = None
 PA14 = ('1.4Pa-x20', '1.4Pa-x40')
@@ -44,7 +45,7 @@ ITEMS = [
      'nuclei the classifier counts (Polynucleated rule)'),
     ('masks', 'Segmented/{c}/Nuclei_filtered', '*.tif', PA14, 'Segmentation/1.4Pa-*/Nuclei.ipynb',
      'nuclei the 1.4 Pa seeds were built from (compare with Nuclei/)'),
-    ('masks', 'Segmented/{c}/Seed', '*_segmented_cells.tif', ('Static-x20', 'Static-x40', 'flow3-x20'),
+    ('masks', 'Segmented/{c}/Seed', '*_segmented_cells.tif', ('Static-x20', 'Static-x40'),
      'Segmentation/<c>/Seed.ipynb', 'merged nuclear seeds used by the watershed'),
     ('masks', 'Segmented/{c}/Seed_or', '*_segmented_cells.tif', ('1.4Pa-x20',),
      'Segmentation/1.4Pa-x20/Seed.ipynb (cell 0)', 'merged nuclear seeds used by the watershed'),
@@ -62,7 +63,7 @@ ITEMS = [
      'VE-cadherin used by the hole threshold'),
     ('images', 'Projected/{c}/Nuclei/tophat', '*.tif', ('Static-x20', '1.4Pa-x20'), 'Projection/<c>.ipynb',
      'nuclear channel the nuclei were segmented from'),
-    ('images', 'Projected/{c}/Nuclei/background', '*.tif', ('Static-x40', 'flow3-x20', '1.4Pa-x40'),
+    ('images', 'Projected/{c}/Nuclei/background', '*.tif', ('Static-x40', '1.4Pa-x40'),
      'Projection/<c>.ipynb', 'nuclear channel the nuclei were segmented from'),
     ('images', 'Projected/{c}/Golgi/tophat', '*.tif', ('Static-x20', 'Static-x40', '1.4Pa-x20', '1.4Pa-x40'),
      'Projection/<c>.ipynb', 'Golgi channel, context for annotation'),
@@ -80,7 +81,7 @@ def matches(root, folder, pattern):
 
 
 def pixel_sizes(root):
-    """Pixel size per (series, magnification), e.g. A1_20x, A1_40x, U_20x.
+    """Pixel size per (series, magnification), e.g. A1_20x, A1_40x.
 
     Read from the original .nd2 files in 'Renamed Data' with the `nd2` package
     (pip install nd2). The files in TIF_Converted were written by 2Tiff.ipynb

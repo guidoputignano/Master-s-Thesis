@@ -15,24 +15,26 @@ multinucleated and senescent fractions, and gap area fraction.
 This layout is not documented anywhere else; it was reconstructed from the
 paths hard-coded in the notebooks. All paths are under
 `MyDrive/knowledge/University/Master/Thesis/`, for each condition `<c>` in
-Static-x20, Static-x40, flow3-x20, 1.4Pa-x20 and 1.4Pa-x40.
+Static-x20, Static-x40, 1.4Pa-x20 and 1.4Pa-x40 (the A1 experiment). The
+notebooks also processed flow3-x20 (series U). It is not used, because its
+experimental conditions are unknown.
 
 **Masks and tables** (small; enough for the diagnostics):
 - `Segmented/<c>/Cell_merged_conservative` (what every reported number uses) and `Segmented/<c>/Cell`
 - `Segmented/<c>/Nuclei`, plus `Nuclei_filtered` for the two 1.4 Pa conditions
-- Seeds: `Segmented/<c>/Seed` (Static-x20, Static-x40, flow3-x20), `Seed_or` (1.4Pa-x20), `Seed_gol` (1.4Pa-x40)
+- Seeds: `Segmented/<c>/Seed` (Static-x20, Static-x40), `Seed_or` (1.4Pa-x20), `Seed_gol` (1.4Pa-x40)
 - `Segmented/<c>/Holes`, plus `Holes_masks` for the two 1.4 Pa conditions
 - `Analysis/<c>/Senescence_Results`
 - Once: `Analysis/combined_cell_data_adjusted.csv`, `Analysis/descriptive_stats_by_pressure_cell_type_adjusted.csv`, `Analysis/Holes/`
 
 **Images** (for the blind audit and annotation):
 - `Projected/<c>/Cadherins/tophat` and `Projected/<c>/Cadherins/background`
-- `Projected/<c>/Nuclei/tophat` (Static-x20, 1.4Pa-x20) or `Projected/<c>/Nuclei/background` (the other three)
-- `Projected/<c>/Golgi/tophat` (no Golgi channel for flow3)
+- `Projected/<c>/Nuclei/tophat` (Static-x20, 1.4Pa-x20) or `Projected/<c>/Nuclei/background` (the other two)
+- `Projected/<c>/Golgi/tophat`
 
-**Pixel size:** one `.nd2` per series and magnification from `Renamed Data/`
-(A1 at 20x, A1 at 40x, U at 20x). The files in `TIF_Converted/` were written
-without metadata and cannot provide it.
+**Pixel size:** one `.nd2` per magnification from `Renamed Data/` (A1 at 20x
+and at 40x). The files in `TIF_Converted/` were written without metadata and
+cannot provide it.
 
 Not needed: `TIF_Converted/`, `denoised*/`, the segmented membrane and Golgi
 masks (`Segmented/<c>/Membrane*`, `Segmented/<c>/Cadherins*`,
