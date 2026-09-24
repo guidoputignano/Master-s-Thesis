@@ -54,6 +54,17 @@ from google.colab import drive; drive.mount('/content/drive')
 !python Master-s-Thesis/Imaging/Validation/export_from_drive.py --part masks   # zips into Thesis/validation_export/
 ```
 
+`export_nd2.py` goes back to the original A1 `.nd2` files for what the projected
+TIFFs lost. Per field it writes one metadata row (objective, recorded and corrected
+pixel size, z step, channels, exposure, stage X/Y/Z, acquisition time), the sharpest
+plane of each channel and the DAPI sum over z (DNA content), with `--stacks` also the
+full z-stack. The 40x files get their corrected 0.2145 µm pixel. In Colab:
+
+```python
+!python Master-s-Thesis/Imaging/Validation/export_nd2.py --check    # list files and metadata only
+!python Master-s-Thesis/Imaging/Validation/export_nd2.py            # zips into Thesis/nd2_export/
+```
+
 ## The plan: three tiers, cheapest first
 
 | Tier | What it answers | Human time | Tool |
@@ -219,6 +230,7 @@ objective. The scripts deliberately have no default.
 - `audit_gallery.py`: blind sampled audit (`build` writes crops and a local verdict page; `score` summarises)
 - `sample_rois.py`: seeded, stratified manifest of what to annotate
 - `export_from_drive.py`: collects the needed Drive files, reads pixel sizes, flags gaps
+- `export_nd2.py`: `.nd2` metadata with stage positions, sharpest planes and DAPI sums (A1 only)
 - Tests: `tests/test_seg_eval.py` (synthetic cases with known answers)
 
 Requirements: `numpy scipy scikit-image pandas tifffile pillow`.

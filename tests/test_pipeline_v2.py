@@ -416,6 +416,79 @@ def test_export_flags_objective_that_does_not_match_the_file_name(tmp_path, monk
     assert 'does not match' in capsys.readouterr().err
 
 
+def test_export_nd2_metadata_planes_and_dapi_sum(tmp_path, monkeypatch):
+    """Fake .nd2 files: A1 only, corrected 40x pixel, sharpest plane, DAPI sum, zips, --check."""
+    import types
+    import zipfile
+    import tifffile
+    en = pytest.importorskip('export_nd2')
+    ft_px = ft.PIXEL_UM
+    assert en.CORRECT_PX_UM == {'20x': ft_px['20x'], '40x': ft_px['40x']}
+    rng = np.random.default_rng(5)
+    sharp = rng.integers(100, 4000, (3, 64, 64)).astype(np.uint16)          # (C, Y, X) in focus
+    from scipy import ndimage as ndi
+    stack = np.stack([sharp if z == 3 else ndi.gaussian_filter(sharp.astype(float), (0, 3 + abs(z - 3), 3 + abs(z - 3))).astype(np.uint16)
+                      for z in range(6)])                                    # (Z, C, Y, X), plane 3 sharp
+
+    class _F:
+        def __init__(self, path):
+            self.path = path
+            self.sizes = {'Z': 6, 'C': 3, 'Y': 64, 'X': 64}
+            self.dtype = np.uint16
+            mic = types.SimpleNamespace(objectiveName='Plan Apo 20x', objectiveMagnification=20.0,
+                                        objectiveNumericalAperture=0.75)
+            self.metadata = types.SimpleNamespace(channels=[
+                types.SimpleNamespace(microscope=mic, channel=types.SimpleNamespace(name=n))
+                for n in ('Cy5', 'DAPI', 'GFP')])
+            self.text_info = {'capturing': 'Andor iXon 888\r\nExposure: 200 ms'}
+            self.loop_indices = tuple({'Z': z} for z in range(6))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def voxel_size(self):
+            return types.SimpleNamespace(x=0.429, y=0.429, z=0.7)
+
+        def frame_metadata(self, i):
+            pos = types.SimpleNamespace(stagePositionUm=(1000.0, -250.0, 3000.0 + 0.7 * i))
+            t = types.SimpleNamespace(absoluteJulianDayNumber=2459568.9)      # 20 Dec 2021, 09:36 UTC
+            return types.SimpleNamespace(channels=[types.SimpleNamespace(position=pos, time=t)])
+
+        def asarray(self):
+            return stack
+
+    monkeypatch.setitem(sys.modules, 'nd2', types.SimpleNamespace(ND2File=_F))
+    d = tmp_path / 'Renamed Data' / 'A1'
+    d.mkdir(parents=True)
+    for name in ('1.4Pa_A1_20dec21_40x_L2RA_FlatA_seq006.nd2', '0Pa_A1_19dec21_20xA_L2RA_FlatA_seq001.nd2',
+                 '0Pa_U_19dec21_20xA_L2RA_FlatA_seq001.nd2'):                  # the last is flow3: skipped
+        (d / name).write_bytes(b'')
+    rows, _, _ = en.export(str(tmp_path), str(tmp_path / 'out'), check=True)
+    assert [r['key'] for r in rows] == ['0Pa_A1_19dec21_20xA_L2RA_FlatA_seq001', '1.4Pa_A1_20dec21_40x_L2RA_FlatA_seq006']
+    assert not (tmp_path / 'out').exists()                                    # --check writes nothing
+    r20, r40 = rows
+    assert r20['px_um'] == 0.429 and r20['px_note'] == ''
+    assert r40['px_um'] == 0.2145 and 'records 20x' in r40['px_note']
+    assert r40['exposure_ms'] == 200.0 and r40['dapi_channel'] == 1 and r40['stage_x_um'] == 1000.0
+    assert abs(r40['z_last_um'] - r40['z_first_um'] - 3.5) < 1e-9 and r40['acquired'] == '2021-12-20T09:36:00'
+
+    rows, planes, stacks = en.export(str(tmp_path), str(tmp_path / 'out'), split_mb=0.05, stacks=True)
+    assert all(r['best_z'] == '3|3|3' for r in rows) and len(planes) > 1   # split at 0.05 MB
+    names = {n: z for z in planes for n in zipfile.ZipFile(z).namelist()}
+    member = 'nd2_planes/1.4Pa_A1_40x/1.4Pa_A1_20dec21_40x_L2RA_FlatA_seq006_dapi_sum.ome.tif'
+    assert member in names and 'nd2_planes/nd2_metadata.csv' in names
+    with zipfile.ZipFile(names[member]) as z:
+        z.extract(member, tmp_path / 'x')
+    with tifffile.TiffFile(tmp_path / 'x' / member) as tf:
+        np.testing.assert_array_equal(tf.asarray(), stack[:, 1].astype(np.uint32).sum(0))
+        assert 'PhysicalSizeX="0.2145"' in tf.ome_metadata
+    focus = pd.read_csv(tmp_path / 'out' / 'nd2_focus.csv')
+    assert len(focus) == 2 * 3 * 6 and set(focus[focus.best == 1].z) == {3}
+    assert any('nd2_stacks/0Pa_A1_20x/' in n for z in stacks for n in zipfile.ZipFile(z).namelist())
+
 def test_golgi_polarity_direction_border_cells_and_offset():
     po = pytest.importorskip('polarity')
     rng = np.random.default_rng(2)
