@@ -16,3 +16,8 @@ The artifacts under this directory (figures, `raw_runs.csv`, `summary.json`,
 these outputs were NOT regenerated. See `docs/mismatch_robustness_report.md` for
 the full note. Re-run the study to refresh them before quoting post-refactor
 numbers.
+
+**Current run (24 September 2026):** `20260924-073004`, with the 3 h adaptation
+constant and the paper's settings (`--n-rep 5 --n-lhs 24`). `20260724-090500` is the
+same study on the previous 7.4 h model, as reported in the paper. See
+`docs/tau_adapt_plateau.md`.

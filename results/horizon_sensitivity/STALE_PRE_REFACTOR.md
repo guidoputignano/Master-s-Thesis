@@ -18,3 +18,7 @@ regenerated. Re-run:
     python -m analysis.horizon_sensitivity --out results/horizon_sensitivity
 
 to refresh them before quoting post-refactor numbers.
+
+**Current runs (24 September 2026):** `20260924-070441` uses the 3 h adaptation
+constant of the reported model; `20260924-065642` is the same study on the previous
+7.4 h model, for comparison. See `docs/tau_adapt_plateau.md`.
