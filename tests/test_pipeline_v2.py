@@ -603,3 +603,36 @@ def test_cell_features_neighbours_on_a_grid():
             cells[10 * i:10 * i + 10, 10 * j:10 * j + 10] = lab
     nb = cf.neighbours(cells)
     assert nb[5] == 8 and nb[1] == 3 and nb[2] == 5              # centre, corner, edge (8-connectivity)
+
+
+def test_round3_scores_gap_area_by_multiplicity_and_outlines_touching_nuclei():
+    import build_verdicts3 as bv3
+    key = pd.DataFrame([
+        dict(verdict_id='V0001', block='gap', shear='Static', mult=3, shear_area=100.0, stratum_n=np.nan),
+        dict(verdict_id='V0002', block='gap', shear='Static', mult=1, shear_area=100.0, stratum_n=np.nan),
+        dict(verdict_id='V0003', block='gap', shear='1.4 Pa', mult=2, shear_area=300.0, stratum_n=np.nan),
+        dict(verdict_id='V0004', block='multinucleated', shear='Static', mult=np.nan, shear_area=np.nan, stratum_n=10),
+        dict(verdict_id='V0005', block='multinucleated', shear='1.4 Pa', mult=np.nan, shear_area=np.nan, stratum_n=30),
+        dict(verdict_id='V0006', block='multinucleated', shear='1.4 Pa', mult=np.nan, shear_area=np.nan, stratum_n=30)])
+    ans = pd.DataFrame({'id': key.verdict_id, 'answer': ['yes', 'no', 'yes', 'yes', 'no', 'unsure']})
+    t = bv3.score_table(key, ans, n_draw=20_000).set_index(['block', 'shear'])
+    # static: 3 of 4 draws yes; flow: 2 of 2; pooled by area 1:3
+    assert abs(t.loc[('gap', 'Static'), 'n'] - 4) < 1e-9 and t.loc[('gap', '1.4 Pa'), 'n'] == 2
+    assert 0.6 < t.loc[('gap', 'Static'), 'estimate'] < 0.8
+    assert t.loc[('gap', '1.4 Pa'), 'estimate'] > t.loc[('gap', 'Static'), 'estimate']
+    assert t.loc[('multinucleated', 'Static'), 'estimate'] == 1.0
+    assert t.loc[('multinucleated', '1.4 Pa'), 'n'] == 1              # the unsure answer is left out
+    assert abs(t.loc[('multinucleated', 'pooled by count'), 'estimate'] - 0.25) < 1e-9
+    # two touching nuclei keep the boundary between them
+    rgb = np.zeros((80, 80, 3))
+    cell = np.zeros((80, 80), bool)
+    cell[20:60, 20:60] = True
+    nuc = np.zeros((80, 80), np.int32)
+    nuc[30:50, 25:40] = 1
+    nuc[30:50, 40:55] = 2
+    im = np.array(bv3.render_multi(rgb, cell, nuc, 0.429, size=160))
+    right = im[:, 168:]
+    red = (right[..., 0] == 255) & (right[..., 1] == 40)
+    ys, xs = np.nonzero(red)
+    mid = (xs.min() + xs.max()) // 2
+    assert red[(ys.min() + ys.max()) // 2, mid - 3:mid + 4].any()   # a red line between the nuclei

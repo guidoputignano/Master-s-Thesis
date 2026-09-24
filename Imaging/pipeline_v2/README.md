@@ -220,6 +220,24 @@ before, with anything within 10 µm of a round-1 object excluded:
 Each crop has three views: junctions, "haze" (the junction channel without top-hat,
 where cytoplasm is grey and bare substrate black) and Golgi.
 
+`build_verdicts3.py` builds round 3 on the clear fields, per shear stress, for the
+two masks no earlier round showed, with anything within 10 µm of a round-1 or
+round-2 object excluded:
+
+- the grown v2.1 gaps, drawn in proportion to their area: is all of the outlined
+  area bare substrate? An overshoot into cytoplasm counts as "no";
+- multinucleated v1 cells, each nucleus outlined in red: are they that many
+  separate, whole nuclei, with no other nucleus in the cell?
+
+```bash
+python build_verdicts3.py build --root /path/to/data-mt --v2r /private/v2r2_masks \
+    --analysis /private/v2r2_analysis_clean \
+    --previous /private/verdicts/key.csv /private/v2_masks /private/v2_analysis \
+    --previous /private/verdicts2/key.csv /private/v2r_masks /private/v2r_analysis \
+    --out /private/verdicts3
+python build_verdicts3.py score --session /private/verdicts3/index.html --code 'VS38:YYN...'
+```
+
 The page (`index.html`, crops embedded) is answered with Y/N/U. The answers
 come back as a short code (`VS<n>:YYNU...`) or a CSV. `verdict_session.py`
 in `../Validation` holds the page and the generic scoring.
