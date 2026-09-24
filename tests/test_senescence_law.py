@@ -219,7 +219,8 @@ def test_inherited_senescence_is_held_and_checked_at_admission():
     assert taus[0] > 1.5 and np.isclose(taus[-1], mpc.tau_max, atol=1e-3)
     heavy = pop.copy()
     heavy[mpc.N + 2] = 0.5 * pop.sum()                         # half the cells senescent
-    assert mpc.admitted(x) is (phi0 <= 0.30 + 1e-9)
+    assert abs(phi0 - 0.30) <= 0.5 / pop.sum()                 # the 30 % design, to half a cell
+    assert mpc.admitted(x)
     assert not mpc.admitted({'pop': heavy, 'rho_h': 1.9, 'theta_h': 0.0})
 
 
