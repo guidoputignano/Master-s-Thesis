@@ -19,7 +19,9 @@ Cellpose's separation of neighbouring cells, but lets each cell grow over the
   nucleus can seed a cell. After the second review, each seed is grown over the connected
   pixels that pass the same test at the 5th percentile (the reviewer saw gaps extending
   beyond their outline), and enclosed specks under 10 um^2 without nuclear signal are
-  filled.
+  filled. After the third review, a grown gap that surrounds a nucleus is removed (it is a
+  faint cell) and nucleus-free voids under 50 um^2 inside a gap are filled
+  (``analyze.nucleus_rule``).
 
 Reads the segment_v2.py output and writes, per field, to ``--out/<cond>/``:
 ``<key>_v2_cells.tif`` (grown cells), ``<key>_v2_nuclei.tif`` (copied),
@@ -93,6 +95,7 @@ def refine(cells, nuclei, cad_tophat, cad_raw, nuc_img, um, grow=True):
     if grow:
         nuclear = (nuclei > 0) | an.nuclear_signal(nuc_img, nuclei)
         gaps = an.grow_gaps(seeds, gaps_at(an.GAP_GROW_PCT, 0.0)[0], nuclear, um)
+        gaps = an.nucleus_rule(gaps, nuclei, nuclear, um)      # third review (see analyze.py)
     sens = (seeds * 8).astype(np.uint8)
     for bit, pct in ((2, 0.5), (4, 5.0)):
         sens |= (gaps_at(pct)[0] * bit).astype(np.uint8)

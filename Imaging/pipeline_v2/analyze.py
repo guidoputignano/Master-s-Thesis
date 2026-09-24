@@ -48,6 +48,7 @@ GAP_OPEN_UM = 0.858     # opening radius: exactly 2 px at 20x and 4 px at 40x (r
 GAP_DARK_PCT = 1.0      # gap pixels are darker than all but this % of cell interiors (per field)
 GAP_GROW_PCT = 5.0      # v2.1: a gap extends over connected pixels darker than this percentile
 GAP_SMOOTH_UM = 1.0     # Gaussian smoothing of the β-catenin projection before the darkness test
+GAP_HOLE_FILL_UM2 = 50.0  # third review: nucleus-free voids inside a gap are filled up to this area
 CORE_UM = 2.0           # cell interior = farther than this from any cell boundary
 
 
@@ -152,6 +153,43 @@ def grow_gaps(seeds, cand, nuclear, um, max_hole_um2=GAP_MIN_UM2):
         fill[0] = False
         ext |= fill[holes]
     return ext
+
+
+def nucleus_rule(gaps, nuclei, nuclear, um, max_hole_um2=GAP_HOLE_FILL_UM2, min_frac=0.5):
+    """Third-review corrections of grown gaps.
+
+    A gap component whose enclosed holes hold at least ``min_frac`` of a nucleus surrounds
+    that nucleus: it is a faint cell, not bare substrate (the review's largest static "gap",
+    3,100 um^2, was a dim senescent cell around its nucleus), so the component is removed.
+    Enclosed holes without nuclear signal and smaller than ``max_hole_um2`` (a tenth of a
+    normal cell) are filled: a void inside a gap is substrate the growth went around.
+    ``nuclei``: nucleus labels; ``nuclear``: pixels with nuclear stain (as in grow_gaps)."""
+    lab = cc_label(gaps, connectivity=2)
+    if not lab.max():
+        return np.asarray(gaps, bool)
+    out = np.asarray(gaps, bool).copy()
+    n_area = np.bincount(np.asarray(nuclei).ravel())
+    nuclear = np.asarray(nuclear, bool)
+    for comp, sl in enumerate(ndimage.find_objects(lab), start=1):
+        if sl is None:
+            continue
+        sl = tuple(slice(max(0, s.start - 1), s.stop + 1) for s in sl)
+        m = lab[sl] == comp
+        holes = ndimage.binary_fill_holes(m) & ~m
+        if not holes.any():
+            continue
+        inside = np.bincount(np.asarray(nuclei)[sl][holes].ravel(), minlength=len(n_area))
+        inside[0] = 0
+        if (inside >= min_frac * np.maximum(n_area, 1)).any() and inside.any():
+            out[sl][m] = False                      # a faint cell around its nucleus
+            continue
+        hl = cc_label(holes, connectivity=1)
+        area = np.bincount(hl.ravel()) * um ** 2
+        nuc = np.bincount(hl.ravel(), weights=nuclear[sl].ravel().astype(float), minlength=len(area))
+        fill = (area < max_hole_um2) & (nuc == 0)
+        fill[0] = False
+        out[sl] |= fill[hl]
+    return out
 
 
 def gap_quality(h1, h2, cad, nuc_img, nuclei, cells, um):

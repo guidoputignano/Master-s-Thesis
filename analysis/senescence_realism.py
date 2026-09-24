@@ -47,15 +47,19 @@ def base_config(**changes):
     return cfg
 
 
+# The comparison of September 2026 (injury term against inherited senescence) was made with
+# the 2 Pa cap of the time; it is kept at that cap so it stays reproducible. The range that
+# replaced the cap is in analysis/shear_range.py.
+CAP_2PA = dict(tau_bounds=(0.0, 2.0))
 SCENARIOS = [
     # label, config changes, controller keyword arguments
     ('Thesis law: injury, induction in session, phi0 0.20, 0.5 Pa/h',
      dict(CONSTANT_SENESCENT_FRACTION=False, INCLUDE_SUPRAPHYSIOLOGICAL_ARM=True,
-          initial_senescent_fraction=0.20), dict(delta_tau_max=0.5)),
-    ('Reported: inherited fraction 0.30', dict(), dict()),
-    ('Reported, with a 0.5 Pa/h ramp limit', dict(), dict(delta_tau_max=0.5)),
-    ('Reported, dense monolayer (tau 6 h)', dict(tau_adapt_hours=6.0, tau_orient_hours=6.0), dict()),
-    ('Reported, inherited fraction 0.20', dict(initial_senescent_fraction=0.20), dict()),
+          initial_senescent_fraction=0.20), dict(delta_tau_max=0.5, **CAP_2PA)),
+    ('Reported: inherited fraction 0.30', dict(), dict(CAP_2PA)),
+    ('Reported, with a 0.5 Pa/h ramp limit', dict(), dict(delta_tau_max=0.5, **CAP_2PA)),
+    ('Reported, dense monolayer (tau 6 h)', dict(tau_adapt_hours=6.0, tau_orient_hours=6.0), dict(CAP_2PA)),
+    ('Reported, inherited fraction 0.20', dict(initial_senescent_fraction=0.20), dict(CAP_2PA)),
 ]
 
 
@@ -78,27 +82,44 @@ def closed_loop(cfg, mpc, n_steps=6):
     return dict(tau=taus, admitted=admitted, hourly=hourly, **last)
 
 
+_MODEL = None
+
+
+def _healthy_targets(tau_pa):
+    """Healthy-cell plateau (angle deg, aspect ratio) of the reported model at a shear."""
+    global _MODEL
+    if _MODEL is None:
+        _MODEL = RecedingHorizonMPC(base_config())
+    return float(np.degrees(flow_alignment_angle(_MODEL.theta_target(tau_pa)))), _MODEL.rho_target(tau_pa)
+
+
+def top_pa():
+    """Top of the justified shear range (config.tau_max_pa, docs/shear_range_and_limits.md)."""
+    return float(base_config().tau_max_pa)
+
+
 def plateau(tau_pa, phi):
     """Population alignment (deg) and aspect ratio at the plateau for a senescent share."""
-    th = _gated(THETA_STAT_DEG, THETA_FLOW_DEG, tau_pa, 0.5)
-    rh = _gated(RHO_STAT, RHO_FLOW, tau_pa, 0.5)
+    th, rh = _healthy_targets(tau_pa)
     return (1 - phi) * th + phi * SEN_DEG, (1 - phi) * rh + phi * RHO_SEN
 
 
 def population_alignment(t, tau_pa, phi, tau_h):
     """Population alignment (deg) at a constant shear from the static state."""
-    th = _gated(THETA_STAT_DEG, THETA_FLOW_DEG, tau_pa, 0.5)
+    th, _ = _healthy_targets(tau_pa)
     healthy = th + (THETA_STAT_DEG - th) * np.exp(-np.asarray(t) / tau_h)
     return (1 - phi) * healthy + phi * SEN_DEG
 
 
 def design_numbers():
-    th2 = _gated(THETA_STAT_DEG, THETA_FLOW_DEG, 2.0, 0.5)
+    top = top_pa()
+    th_top, _ = _healthy_targets(top)
     out = {
         'plateau': {f'{tau:g} Pa': {f'{p:.1f}': [round(v, 3) for v in plateau(tau, p)]
-                                     for p in (0, .1, .2, .3, .4, .5)} for tau in (1.4, 2.0)},
+                                     for p in (0, .1, .2, .3, .4, .5)} for tau in (1.4, top)},
         'mixture_check_1p4Pa': {f'{p:.1f}': [round(plateau(1.4, p)[0], 1), MIXTURE[p]] for p in MIXTURE},
-        'max_senescent_share_2Pa': {f'{t:g} deg': round((t - th2) / (SEN_DEG - th2), 3) for t in (22.5, 25.0, 27.5)},
+        f'max_senescent_share_{top:g}Pa': {f'{t:g} deg': round((t - th_top) / (SEN_DEG - th_top), 3)
+                                           for t in (22.5, 25.0, 27.5)},
         'time_to_90_95_percent_h': {f'{tau:g} h': [round(tau * np.log(10), 1), round(tau * np.log(20), 1)]
                                     for tau in (2, 3, 4, 6, 8)},
     }
@@ -117,7 +138,8 @@ def figure(path_noext):
                          'pdf.fonttype': 42, 'savefig.dpi': 300})
     fig, (a, b) = plt.subplots(1, 2, figsize=(17.5 / 2.54, 6.4 / 2.54))
     phi = np.linspace(0, 1, 101)
-    for tau, c, lab in ((1.4, blue, '1.4 Pa'), (2.0, orange, '2 Pa')):
+    top = top_pa()
+    for tau, c, lab in ((1.4, blue, '1.4 Pa'), (top, orange, f'{top:g} Pa')):
         a.plot(phi * 100, [plateau(tau, p)[0] for p in phi], color=c, lw=1.5, label=f'model, {lab}')
     xs, ys = zip(*MIXTURE.items())
     a.plot(np.array(xs) * 100, ys, 'o', ms=5, mfc='white', mec=ink, mew=1.0, label='measured, 1.4 Pa')
@@ -130,12 +152,12 @@ def figure(path_noext):
     for (p, tau_h, c, lab, dy) in ((0.0, 3.0, blue, r'no senescent cells, $T_{\rm adapt}$ = 3 h', 0.0),
                                    (0.3, 3.0, orange, r'30 % senescent, $T_{\rm adapt}$ = 3 h', -1.3),
                                    (0.3, 6.0, aqua, r'30 % senescent, $T_{\rm adapt}$ = 6 h (dense)', 1.3)):
-        y = population_alignment(t, 2.0, p, tau_h)
+        y = population_alignment(t, top, p, tau_h)
         b.plot(t, y, color=c, lw=1.5, label=lab)
         b.text(16.3, y[-1] + dy, f'{y[-1]:.0f}°', color=ink, va='center', fontsize=8)
     b.axvline(6, ymax=0.6, color=muted, lw=0.6, ls=':')
     b.text(6.2, 11.2, '6 h', color=muted, fontsize=8)
-    b.set_xlabel('time at 2 Pa (h)')
+    b.set_xlabel(f'time at {top:g} Pa (h)')
     b.set_ylabel('population alignment (deg)')
     b.set_xticks([0, 4, 8, 12, 16])
     b.set_xlim(0, 18); b.set_ylim(10, 50)

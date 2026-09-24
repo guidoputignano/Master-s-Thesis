@@ -1,5 +1,10 @@
 # Senescence within a conditioning session: inherited, not induced
 
+> **Range updated.** The runs in this note cap the shear at 2 Pa, a choice made at
+> the time and not a limit of the chamber. The justified range is now 0–4 Pa, and
+> the controller climbs toward 4 Pa. The comparison below is kept at the 2 Pa cap so
+> that it stays reproducible. See `docs/shear_range_and_limits.md`.
+
 The reported model now holds the senescent fraction of the seeded batch constant
 during a conditioning session. It no longer has an injury term, and the 30 % cap
 is an admission check on the batch. With realistic biology, shear in 0–2 Pa only

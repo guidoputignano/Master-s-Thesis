@@ -1,0 +1,97 @@
+{
+ "PARAMS": {
+  "theta_stat_deg": [
+   45.0,
+   45.0,
+   45.0
+  ],
+  "rho_stat": [
+   1.5,
+   1.9,
+   2.0
+  ],
+  "theta_ref_deg": [
+   11.0,
+   20.0,
+   22.0
+  ],
+  "rho_ref": [
+   2.2,
+   2.3,
+   3.3
+  ],
+  "tau_act_pa": [
+   0.3,
+   0.5,
+   0.7
+  ],
+  "T_model_h": [
+   2.0,
+   3.0,
+   4.0
+  ],
+  "T_lit_h": [
+   2.0,
+   3.0,
+   12.0
+  ],
+  "theta_sen_deg": [
+   44.0,
+   45.0,
+   47.0
+  ],
+  "rho_sen": [
+   1.76,
+   2.0,
+   2.1
+  ],
+  "theta_floor_deg": [
+   11.0,
+   11.0,
+   11.0
+  ]
+ },
+ "HYPOTHESES": {
+  "model": "reported model: parallel alignment improving up to 5 Pa (Robotti 2014, same chamber)",
+  "edge_2Pa": "HUVEC aligned only up to about 2 Pa, perpendicular above (Baeyens 2015; crossover 2.7 Pa)",
+  "long_confluent": "long-confluent monolayers, as measured after 16 h in the same chamber (Robotti 2014)"
+ },
+ "GAP": {
+  "static_30": [
+   0.5,
+   1.5
+  ],
+  "young_ratio": [
+   1.0,
+   3.5
+  ],
+  "flow_ratio": {
+   "(1.0, 'step')": [
+    1.0,
+    2.0
+   ],
+   "(1.0, 'ramp')": [
+    1.0,
+    2.0
+   ],
+   "(6.0, 'step')": [
+    1.0,
+    3.8
+   ],
+   "(6.0, 'ramp')": [
+    1.0,
+    3.8
+   ],
+   "(24.0, 0.0)": [
+    0.5,
+    1.0
+   ],
+   "(24.0, 0.3)": [
+    0.5,
+    3.8
+   ]
+  }
+ },
+ "top_pa": 4.0,
+ "ramp_min": 30.0
+}

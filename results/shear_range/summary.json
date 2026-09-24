@@ -1,0 +1,436 @@
+{
+ "range_pa": [
+  0.0,
+  4.0
+ ],
+ "band_top_pa": 5.0,
+ "crossover_pa": 6.0,
+ "closed_loop": [
+  {
+   "label": "Reported: range 0-4 Pa (integrity), band to 5 Pa",
+   "bound_pa": 4.0,
+   "tau": [
+    1.89,
+    2.543,
+    2.904,
+    3.145,
+    3.321,
+    3.458,
+    3.57,
+    3.663,
+    3.744,
+    3.815,
+    3.878,
+    3.932
+   ],
+   "at_6h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.217,
+    "varphi_bar": 27.075,
+    "healthy": 19.332
+   },
+   "at_12h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.258,
+    "varphi_bar": 24.513,
+    "healthy": 15.663
+   }
+  },
+  {
+   "label": "Band edge at 2 Pa (Baeyens 2015), range 0-4 Pa",
+   "bound_pa": 4.0,
+   "tau": [
+    1.784,
+    2.014,
+    2.018,
+    2.018,
+    2.018,
+    2.018,
+    2.018,
+    2.018,
+    2.018,
+    2.018,
+    2.018,
+    2.018
+   ],
+   "at_6h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.205,
+    "varphi_bar": 27.831,
+    "healthy": 20.414
+   },
+   "at_12h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.243,
+    "varphi_bar": 25.476,
+    "healthy": 17.042
+   }
+  },
+  {
+   "label": "Bound at the chamber (8 Pa), band to 5 Pa",
+   "bound_pa": 8.0,
+   "tau": [
+    1.89,
+    2.543,
+    2.904,
+    3.144,
+    3.32,
+    3.458,
+    3.57,
+    3.664,
+    3.744,
+    3.815,
+    3.878,
+    3.934
+   ],
+   "at_6h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.217,
+    "varphi_bar": 27.075,
+    "healthy": 19.332
+   },
+   "at_12h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.258,
+    "varphi_bar": 24.513,
+    "healthy": 15.663
+   }
+  },
+  {
+   "label": "No perpendicular state, bound 8 Pa (earlier model)",
+   "bound_pa": 8.0,
+   "tau": [
+    1.89,
+    2.543,
+    2.904,
+    3.145,
+    3.32,
+    3.458,
+    3.57,
+    3.663,
+    3.744,
+    3.815,
+    3.878,
+    3.935
+   ],
+   "at_6h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.217,
+    "varphi_bar": 27.075,
+    "healthy": 19.332
+   },
+   "at_12h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.258,
+    "varphi_bar": 24.513,
+    "healthy": 15.663
+   }
+  },
+  {
+   "label": "Calibrated shear only: range 0-1.4 Pa",
+   "bound_pa": 1.4,
+   "tau": [
+    1.4,
+    1.4,
+    1.4,
+    1.4,
+    1.4,
+    1.4,
+    1.4,
+    1.4,
+    1.4,
+    1.4,
+    1.4,
+    1.4
+   ],
+   "at_6h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.172,
+    "varphi_bar": 29.905,
+    "healthy": 23.383
+   },
+   "at_12h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.204,
+    "varphi_bar": 27.862,
+    "healthy": 20.458
+   }
+  },
+  {
+   "label": "Set point 3.5 Pa (chamber tolerance +/-14 % kept below 4 Pa)",
+   "bound_pa": 3.5,
+   "tau": [
+    1.89,
+    2.543,
+    2.904,
+    3.144,
+    3.313,
+    3.416,
+    3.477,
+    3.5,
+    3.5,
+    3.5,
+    3.5,
+    3.5
+   ],
+   "at_6h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.217,
+    "varphi_bar": 27.077,
+    "healthy": 19.334
+   },
+   "at_12h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.258,
+    "varphi_bar": 24.535,
+    "healthy": 15.693
+   }
+  },
+  {
+   "label": "Reported, 0.5 Pa/h ramp limit",
+   "bound_pa": 4.0,
+   "tau": [
+    0.5,
+    1.0,
+    1.5,
+    2.0,
+    2.5,
+    2.866,
+    3.111,
+    3.291,
+    3.432,
+    3.546,
+    3.643,
+    3.726
+   ],
+   "at_6h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.183,
+    "varphi_bar": 29.187,
+    "healthy": 22.355
+   },
+   "at_12h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.253,
+    "varphi_bar": 24.817,
+    "healthy": 16.098
+   }
+  },
+  {
+   "label": "Reported, dense monolayer (T 6 h)",
+   "bound_pa": 4.0,
+   "tau": [
+    1.806,
+    2.449,
+    2.806,
+    3.043,
+    3.216,
+    3.35,
+    3.458,
+    3.548,
+    3.624,
+    3.691,
+    3.751,
+    3.803
+   ],
+   "at_6h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.139,
+    "varphi_bar": 31.971,
+    "healthy": 26.343
+   },
+   "at_12h": {
+    "phi_sen": 0.302,
+    "rho_bar": 2.218,
+    "varphi_bar": 27.009,
+    "healthy": 19.237
+   }
+  },
+  {
+   "label": "Reported, inherited fraction 0.20",
+   "bound_pa": 4.0,
+   "tau": [
+    1.92,
+    2.572,
+    2.93,
+    3.166,
+    3.339,
+    3.473,
+    3.582,
+    3.674,
+    3.753,
+    3.822,
+    3.884,
+    3.936
+   ],
+   "at_6h": {
+    "phi_sen": 0.201,
+    "rho_bar": 2.248,
+    "varphi_bar": 24.485,
+    "healthy": 19.32
+   },
+   "at_12h": {
+    "phi_sen": 0.201,
+    "rho_bar": 2.295,
+    "varphi_bar": 21.561,
+    "healthy": 15.661
+   }
+  }
+ ],
+ "design": {
+  "1.4 Pa": {
+   "tau_act 0.5 (nominal)": {
+    "healthy_plateau_deg": 20.0,
+    "max_senescent_share": {
+     "22.5 deg": 0.1,
+     "25 deg": 0.2,
+     "27.5 deg": 0.3,
+     "30 deg": 0.4
+    }
+   },
+   "tau_act 0.3": {
+    "healthy_plateau_deg": 20.0,
+    "max_senescent_share": {
+     "22.5 deg": 0.1,
+     "25 deg": 0.2,
+     "27.5 deg": 0.3,
+     "30 deg": 0.4
+    }
+   },
+   "tau_act 0.7": {
+    "healthy_plateau_deg": 20.0,
+    "max_senescent_share": {
+     "22.5 deg": 0.1,
+     "25 deg": 0.2,
+     "27.5 deg": 0.3,
+     "30 deg": 0.4
+    }
+   }
+  },
+  "4 Pa": {
+   "tau_act 0.5 (nominal)": {
+    "healthy_plateau_deg": 15.08,
+    "max_senescent_share": {
+     "22.5 deg": 0.248,
+     "25 deg": 0.332,
+     "27.5 deg": 0.415,
+     "30 deg": 0.499
+    }
+   },
+   "tau_act 0.3": {
+    "healthy_plateau_deg": 19.34,
+    "max_senescent_share": {
+     "22.5 deg": 0.123,
+     "25 deg": 0.22,
+     "27.5 deg": 0.318,
+     "30 deg": 0.415
+    }
+   },
+   "tau_act 0.7": {
+    "healthy_plateau_deg": 11.0,
+    "max_senescent_share": {
+     "22.5 deg": 0.338,
+     "25 deg": 0.412,
+     "27.5 deg": 0.485,
+     "30 deg": 0.559
+    }
+   }
+  },
+  "time_to_90_95_percent_h": {
+   "2 h": [
+    4.6,
+    6.0
+   ],
+   "3 h": [
+    6.9,
+    9.0
+   ],
+   "4 h": [
+    9.2,
+    12.0
+   ],
+   "6 h": [
+    13.8,
+    18.0
+   ],
+   "8 h": [
+    18.4,
+    24.0
+   ],
+   "12 h": [
+    27.6,
+    35.9
+   ]
+  },
+  "healthy_plateau_along_the_gate_deg": {
+   "tau_act 0.5 (nominal)": {
+    "1.4 Pa": 20.0,
+    "2 Pa": 16.54,
+    "2.5 Pa": 15.6,
+    "3 Pa": 15.25,
+    "3.5 Pa": 15.12,
+    "4 Pa": 15.08
+   },
+   "tau_act 0.3": {
+    "1.4 Pa": 20.0,
+    "2 Pa": 19.43,
+    "2.5 Pa": 19.36,
+    "3 Pa": 19.35,
+    "3.5 Pa": 19.34,
+    "4 Pa": 19.34
+   },
+   "tau_act 0.7": {
+    "1.4 Pa": 20.0,
+    "2 Pa": 11.62,
+    "2.5 Pa": 11.0,
+    "3 Pa": 11.0,
+    "3.5 Pa": 11.0,
+    "4 Pa": 11.0
+   }
+  }
+ },
+ "robotti_2014": {
+  "0.0": [
+   43.5,
+   1.0
+  ],
+  "1.4": [
+   38.0,
+   0.99
+  ],
+  "4.0": [
+   36.5,
+   1.0
+  ],
+  "5.0": [
+   21.5,
+   0.84
+  ],
+  "6.0": [
+   43.5,
+   0.43
+  ],
+  "8.0": [
+   39.5,
+   0.26
+  ]
+ },
+ "stefopoulos_2017": {
+  "0.0": [
+   1.0,
+   1.04
+  ],
+  "1.4": [
+   1.0,
+   0.8
+  ],
+  "4.0": [
+   0.95,
+   0.67
+  ],
+  "6.0": [
+   0.8,
+   0.52
+  ]
+ }
+}

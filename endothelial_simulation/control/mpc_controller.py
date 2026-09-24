@@ -630,6 +630,9 @@ THETA_STAT_STD_DEG = 25.0  # Source: Chala et al. 2021 — orientation spread, s
 THETA_FLOW_STD_DEG = 14.0  # Source: Chala et al. 2021 — orientation spread, flow (20 +/- 14 deg)
 RHO_SEN = 2.0           # senescent aspect ratio (no flow response)
 PHI_SEN_RANDOM = np.pi / 4.0  # mean acute alignment of randomly oriented senescent cells
+THETA_PERP_DEG = 70.0   # perpendicular plateau: about 90 deg to the flow at 8 Pa in the same chamber
+                        # (Stefopoulos et al. 2022), as a mean acute angle with the same spread about
+                        # its axis as the 20 deg parallel plateau
 
 
 def flow_alignment_angle(theta):
@@ -647,6 +650,23 @@ def _s_activation(tau, tau_act):
     if tau <= tau_act:
         return 0.0
     return 1.0 - np.exp(-(tau - tau_act) / tau_act)
+
+
+def perpendicular_weight(tau, band_top, crossover):
+    """Share of the perpendicular state in the healthy-cell orientation target.
+
+    HUVEC align with the flow only within a band of shear (about 1-2 Pa after 16 h;
+    Baeyens et al., eLife 2015) and turn perpendicular at 8 Pa in the same chamber as the
+    reference data (Stefopoulos et al., Adv Sci 2022). The weight is 0 up to the top of the
+    band, rises as a smoothstep through ``crossover`` (the shear at which both states are
+    equally likely), and is 1 from 2 * crossover - band_top on."""
+    if not np.isfinite(band_top) or tau <= band_top:
+        return 0.0
+    full = 2.0 * crossover - band_top
+    if full <= band_top:
+        return 1.0
+    x = min(1.0, (tau - band_top) / (full - band_top))
+    return x * x * (3.0 - 2.0 * x)
 
 
 def _gated(y_stat, y_flow, tau, tau_act):
@@ -670,7 +690,9 @@ class RecedingHorizonMPC:
 
     Optimal control problem
     -----------------------
-    Decision variable:  tau(k) in [0, 2] Pa on a 1 h control grid.
+    Decision variable:  tau(k) in [0, tau_max] Pa on a 1 h control grid, tau_max =
+                        config.tau_max_pa = 4 Pa (junction integrity in the chamber;
+                        docs/shear_range_and_limits.md).
     Prediction horizon: N_p steps;  control horizon: N_c steps (blocked input).
     Cost (Task 5, Part A — tracking of aspect ratio and flow-alignment angle
     plus a move regularizer; senescence is enforced as a hard constraint, NOT a
@@ -679,9 +701,9 @@ class RecedingHorizonMPC:
           + w_varphi * sum_k (varphi_bar(k) - 0.0)^2
           + w_u      * sum_k (tau(k) - tau(k-1))^2
     Hard constraints:
-        0 <= tau(k) <= 2                       (magnitude bounds)
+        0 <= tau(k) <= tau_max                 (magnitude bounds)
         |tau(k) - tau(k-1)| <= delta_tau_max   (move bound; by default the whole
-                                                band, see __init__)
+                                                range, see __init__)
         phi_sen(k) <= 0.30                     (only when the senescent fraction
                                                 evolves, CONSTANT_SENESCENT_FRACTION
                                                 = False; otherwise it is an
@@ -714,7 +736,10 @@ class RecedingHorizonMPC:
       * orientation:   theta_stat = 45 deg -> theta_flow = 20 deg at 1.4 Pa
         (theta_target; healthy cells, the plateau of control monolayers)
     Below tau_act the monolayer stays isotropic (s = 0, targets = static); at
-    2 Pa the targets are 16.5 deg and 2.36.
+    2 Pa the targets are 16.5 deg and 2.36, at 4 Pa 15.1 deg and 2.38 (both
+    extrapolated). Above the band of parallel alignment
+    (config.parallel_band_top_pa) the orientation target turns toward the
+    perpendicular state (perpendicular_weight).
     Per-cell heterogeneity is added as target = mean + z * std(tau), z fixed per
     cell, with the experimental spread itself gated static -> flow.
 
@@ -780,19 +805,26 @@ class RecedingHorizonMPC:
 
     def __init__(self, config,
                  dt_h=1.0, n_prediction=6, n_control=3,
-                 tau_bounds=(0.0, 2.0), phi_sen_max=0.30, delta_tau_max=None,
+                 tau_bounds=None, phi_sen_max=0.30, delta_tau_max=None,
                  w_rho=1.0, w_varphi=5.0, w_u=0.1):
         self.config = config
         self.dt_h = dt_h
         self.Np = n_prediction
         self.Nc = n_control
+        # Shear bounds: 0 to the top of the justified range (config.tau_max_pa, 4 Pa: junction
+        # integrity in the chamber of the reference data). Above the parallel band the orientation
+        # target turns perpendicular (theta_target), which stops the controller inside the range
+        # only if the band ends below the top (sensitivity: parallel_band_top_pa = 2). The 2 Pa
+        # cap used until September 2026 was a choice, not a limit of the chamber.
+        if tau_bounds is None:
+            tau_bounds = (0.0, float(getattr(config, 'tau_max_pa', 2.0)))
         self.tau_min, self.tau_max = tau_bounds
         self.phi_sen_max = phi_sen_max
         # Hard move bound |tau(k)-tau(k-1)| <= delta_tau_max (Pa per control
         # interval), a control-design parameter. A sudden onset of flow triggers
         # proliferative and inflammatory signalling, but a 30 s ramp avoids it
         # (White et al. 2001; Bao et al. 1999), far below the 1 h control step,
-        # so by default the bound spans the whole band. The thesis used 0.5 Pa/h.
+        # so by default the bound spans the whole range. The thesis used 0.5 Pa/h.
         self.delta_tau_max = (self.tau_max - self.tau_min) if delta_tau_max is None else delta_tau_max
         # No w_phi: senescence is a hard constraint, not a soft penalty (Part A).
         self.w_rho, self.w_varphi, self.w_u = w_rho, w_varphi, w_u
@@ -833,13 +865,20 @@ class RecedingHorizonMPC:
         self.tau_orient = getattr(config, 'tau_orient_hours', 3.0)
         self.theta_stat = np.radians(THETA_STAT_DEG)
         self.theta_flow = np.radians(THETA_FLOW_DEG)
+        # Parallel band and the perpendicular state above it (see perpendicular_weight); without
+        # these config fields the target stays parallel at any shear (the model before September 2026).
+        self.band_top = float(getattr(config, 'parallel_band_top_pa', np.inf))
+        self.crossover = float(getattr(config, 'perpendicular_crossover_pa', np.inf))
+        self.theta_perp = np.radians(float(getattr(config, 'theta_perp_deg', THETA_PERP_DEG)))
 
     # ---- target maps (population mean) --------------------------------------
     def rho_target(self, tau):
         return _gated(RHO_STAT, RHO_FLOW, tau, self.tau_act)
 
     def theta_target(self, tau):
-        return _gated(self.theta_stat, self.theta_flow, tau, self.tau_act)
+        th = _gated(self.theta_stat, self.theta_flow, tau, self.tau_act)
+        w = perpendicular_weight(tau, self.band_top, self.crossover)
+        return th + (self.theta_perp - th) * w
 
     # ---- per-cell target spread (experimental +/- std, gated by flow) -------
     def rho_std(self, tau):
@@ -1129,10 +1168,11 @@ def _build_animation(frames, out_dir):
     return gif
 
 
-def _summary_plots(log, out_dir):
+def _summary_plots(log, out_dir, tau_max=None):
     """Summary figures of a closed-loop run, one measure per axis.
 
-    Writes mpc_tau_trajectory.pdf (the applied input), mpc_aspect_ratio.pdf and
+    Writes mpc_tau_trajectory.pdf (the applied input, with the top of the shear range
+    ``tau_max`` dotted), mpc_aspect_ratio.pdf and
     mpc_alignment.pdf (population mean and healthy cells, with the healthy-cell
     target at the final input dotted), and mpc_phi_sen.pdf (the senescent
     fraction and the 0.30 limit). Colours are categorical slots 1-2 of a palette
@@ -1174,7 +1214,11 @@ def _summary_plots(log, out_dir):
         # input: step function, tau[k] held on [t_k, t_{k+1})
         fig, ax = plt.subplots(figsize=size)
         ax.step(np.append(t[:-1], t[-1]), np.append(tau, tau[-1]), where='post', color=blue, lw=1.5)
-        ax.set_ylim(-0.05, 2.1)
+        top = float(np.max(tau)) if tau_max is None else float(tau_max)
+        if tau_max is not None:
+            ax.axhline(top, color=muted, lw=0.6, ls=':')
+            ax.text(t[-1] * 1.02, top, 'top of\nthe range', color=ink, va='center', fontsize=7)
+        ax.set_ylim(-0.05, 1.08 * top)
         finish(ax, fig, 'mpc_tau_trajectory.pdf', 'wall shear stress (Pa)')
 
         fig, ax = plt.subplots(figsize=size)
@@ -1233,7 +1277,7 @@ def _build_dashboard(frames, ts, mpc, out_dir):
     for ax in (ax_tau, ax_rho, ax_ang):
         ax.set_xlim(0, tmax)
         ax.spines[['top', 'right']].set_visible(False)
-    ax_tau.set_ylim(-0.05, 2.1); ax_tau.set_ylabel(r'$\tau$ (Pa)')
+    ax_tau.set_ylim(-0.05, 1.08 * mpc.tau_max); ax_tau.set_ylabel(r'$\tau$ (Pa)')
     ax_rho.set_ylim(1.8, 2.5); ax_rho.set_ylabel('aspect ratio')
     ax_rho.axhline(RHO_FLOW, ls=':', color='0.4', lw=0.8)
     ax_ang.set_ylabel('angle (deg)'); ax_ang.set_xlabel('time (h)')
@@ -1508,7 +1552,7 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
     print(f"🖥️  Assembling composite dashboard ...")
     dash_path = _build_dashboard(frames, ts, mpc, output_dir)
     print(f"   dashboard -> {dash_path}")
-    _summary_plots(log, output_dir)
+    _summary_plots(log, output_dir, tau_max=mpc.tau_max)
     print(f"📈 Summary figures written to {output_dir}")
 
     return {'log': log, 'ts': ts, 'frames': [f['path'] for f in frames],

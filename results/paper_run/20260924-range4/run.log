@@ -1,0 +1,45 @@
+======================================================================
+Endothelial mechanoadaptation — receding-horizon MPC
+  confluent cell count : 179
+  phi_sen(0)           : 0.3 (all stress-induced)
+  pixel scale          : 0.6348 um/px
+======================================================================
+🎲 RNG seed (master): 42
+Grid initialized: Display 1024x1024, Computation 256x256
+🔄 Initializing event-driven simulation with 179 cells...
+Creating 179 cells...
+Created 0/179 cells
+Created 50/179 cells
+Created 100/179 cells
+Created 150/179 cells
+Computing initial tessellation...
+Optimizing initial positions...
+Grid populated with 179 cells
+🧬 Initial senescence set: phi_sen(0)=0.302 (54/179 cells: 54 stress, 0 telomere)
+✅ Initialized with energy: 158.9997
+🎲 MPC heterogeneity RNG seed: 42
+▶ MPC start: phi_sen=0.302, rho_bar=1.930, varphi_bar=45.0 deg, healthy_align=45.0 deg
+  step 00: tau=1.890 Pa  (SLSQP ok, J=10.118)  phi_sen=0.302  rho_bar=2.019  healthy_align=37.0 deg
+  step 01: tau=2.543 Pa  (SLSQP ok, J=8.367)  phi_sen=0.302  rho_bar=2.087  healthy_align=30.9 deg
+  step 02: tau=2.904 Pa  (SLSQP ok, J=7.399)  phi_sen=0.302  rho_bar=2.137  healthy_align=26.5 deg
+  step 03: tau=3.145 Pa  (SLSQP ok, J=6.763)  phi_sen=0.302  rho_bar=2.173  healthy_align=23.3 deg
+  step 04: tau=3.321 Pa  (SLSQP ok, J=6.331)  phi_sen=0.302  rho_bar=2.198  healthy_align=21.0 deg
+  step 05: tau=3.458 Pa  (SLSQP ok, J=6.033)  phi_sen=0.302  rho_bar=2.217  healthy_align=19.3 deg
+  step 06: tau=3.570 Pa  (SLSQP ok, J=5.825)  phi_sen=0.302  rho_bar=2.230  healthy_align=18.1 deg
+  step 07: tau=3.663 Pa  (SLSQP ok, J=5.679)  phi_sen=0.302  rho_bar=2.240  healthy_align=17.3 deg
+  step 08: tau=3.744 Pa  (SLSQP ok, J=5.575)  phi_sen=0.302  rho_bar=2.247  healthy_align=16.7 deg
+  step 09: tau=3.815 Pa  (SLSQP ok, J=5.502)  phi_sen=0.302  rho_bar=2.252  healthy_align=16.2 deg
+  step 10: tau=3.878 Pa  (SLSQP ok, J=5.449)  phi_sen=0.302  rho_bar=2.255  healthy_align=15.9 deg
+  step 11: tau=3.932 Pa  (SLSQP ok, J=5.411)  phi_sen=0.302  rho_bar=2.258  healthy_align=15.7 deg
+🎞️  Assembling tessellation animation from 49 frames ...
+   animation -> results/paper_run/20260924-range4/mpc_animation.gif
+🖥️  Assembling composite dashboard ...
+   dashboard -> results/paper_run/20260924-range4/mpc_dashboard.gif
+📈 Summary figures written to results/paper_run/20260924-range4
+
+✅ MPC run complete.
+   frames    : 49 PDFs in results/paper_run/20260924-range4/frames
+   animation : results/paper_run/20260924-range4/mpc_animation.gif
+   dashboard : results/paper_run/20260924-range4/mpc_dashboard.gif
+   summaries : mpc_tau_trajectory.pdf, mpc_aspect_ratio.pdf, mpc_alignment.pdf, mpc_phi_sen.pdf, log.json
+rc=0

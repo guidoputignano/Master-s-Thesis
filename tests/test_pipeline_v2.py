@@ -636,3 +636,27 @@ def test_round3_scores_gap_area_by_multiplicity_and_outlines_touching_nuclei():
     ys, xs = np.nonzero(red)
     mid = (xs.min() + xs.max()) // 2
     assert red[(ys.min() + ys.max()) // 2, mid - 3:mid + 4].any()   # a red line between the nuclei
+
+
+def test_nucleus_rule_removes_gaps_around_a_nucleus_and_fills_small_voids():
+    import analyze as an
+    um = 0.429
+    gaps = np.zeros((120, 120), bool)
+    nuclei = np.zeros((120, 120), np.int32)
+    gaps[5:45, 5:45] = True
+    gaps[15:35, 15:35] = False                    # ring around a nucleus: a faint cell
+    nuclei[18:32, 18:32] = 1
+    gaps[60:100, 5:45] = True
+    gaps[78:84, 22:28] = False                    # 36 px = 6.6 um^2 void, no nucleus: filled
+    gaps[60:110, 60:110] = True
+    gaps[70:100, 70:100] = False                  # 900 px = 166 um^2 void, no nucleus: kept
+    out = an.nucleus_rule(gaps, nuclei, nuclei > 0, um)
+    assert not out[5:45, 5:45].any()              # the ring is gone
+    assert out[78:84, 22:28].all()                # the small void is filled
+    assert not out[70:100, 70:100].any() and out[60:70, 60:110].all()
+    # a gap that only touches a nucleus from outside is kept
+    g2 = np.zeros((60, 60), bool)
+    g2[10:30, 10:30] = True
+    n2 = np.zeros((60, 60), np.int32)
+    n2[30:40, 10:20] = 1
+    assert (an.nucleus_rule(g2, n2, n2 > 0, um) == g2).all()

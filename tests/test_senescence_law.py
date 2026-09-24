@@ -13,13 +13,14 @@ Covers:
     multi-start solve, and that the controller actuates out of the gate dead zone.
 """
 import numpy as np
+import pytest
 
 from endothelial_simulation.config import SimulationConfig
 from endothelial_simulation.models.population_dynamics import (
     PopulationDynamicsModel, population_reduced_rhs, gamma_tau_hill,
 )
 from endothelial_simulation.control.mpc_controller import (
-    RecedingHorizonMPC, RHO_FLOW,
+    RecedingHorizonMPC, RHO_FLOW, flow_alignment_angle,
 )
 from analysis.horizon_sensitivity import generate_initial_population
 
@@ -200,8 +201,8 @@ def test_move_bound_binds_and_is_deterministic():
 
 def test_inherited_senescence_is_held_and_checked_at_admission():
     """Reported model: the senescent fraction does not change within a session,
-    the cap is an admission check, and without injury the controller goes to the
-    top of the band."""
+    the cap is an admission check, and without injury the controller climbs, and
+    never lowers, the shear within the justified range."""
     cfg = SimulationConfig()
     assert cfg.CONSTANT_SENESCENT_FRACTION and not cfg.INCLUDE_SUPRAPHYSIOLOGICAL_ARM
     mpc = RecedingHorizonMPC(cfg)
@@ -216,7 +217,8 @@ def test_inherited_senescence_is_held_and_checked_at_admission():
         x = mpc.predict_step(x, u_prev)
         taus.append(u_prev)
     assert np.array_equal(x['pop'], pop) and np.isclose(mpc.outputs(x)[0], phi0)
-    assert taus[0] > 1.5 and np.isclose(taus[-1], mpc.tau_max, atol=1e-3)
+    assert taus[0] > 1.5 and all(b >= a - 1e-6 for a, b in zip(taus, taus[1:]))
+    assert taus[-1] <= mpc.tau_max + 1e-9 and mpc.tau_max == cfg.tau_max_pa
     heavy = pop.copy()
     heavy[mpc.N + 2] = 0.5 * pop.sum()                         # half the cells senescent
     assert abs(phi0 - 0.30) <= 0.5 / pop.sum()                 # the 30 % design, to half a cell
@@ -244,3 +246,21 @@ def test_controller_actuates_out_of_gate_dead_zone():
     # the controller drives shear up (does not stall at zero)
     assert taus[-1] > 0.5
     assert taus[-1] >= taus[0]
+
+
+def test_the_controller_stops_at_the_top_of_the_parallel_band():
+    """Above the band of parallel alignment the orientation target turns perpendicular, so
+    with the chamber's 8 Pa as the only bound the controller stops at the band edge."""
+    cfg = SimulationConfig()
+    cfg.tau_max_pa, cfg.parallel_band_top_pa, cfg.perpendicular_crossover_pa = 8.0, 2.0, 2.7
+    mpc = RecedingHorizonMPC(cfg)
+    deg = lambda t: np.degrees(flow_alignment_angle(mpc.theta_target(t)))
+    assert deg(1.4) == pytest.approx(20.0) and deg(2.0) < deg(1.4) < deg(2.6) and deg(8.0) == pytest.approx(70.0)
+    pop = generate_initial_population(cfg, seed=42)
+    x = {'pop': pop, 'rho_h': mpc.rho_target(0.0), 'theta_h': mpc.theta_target(0.0)}
+    u_prev = 0.0
+    for _ in range(4):
+        u, _res = mpc.solve(x, u_prev)
+        u_prev = float(np.clip(u[0], mpc.tau_min, mpc.tau_max))
+        x = mpc.predict_step(x, u_prev)
+    assert 1.9 < u_prev < 2.2

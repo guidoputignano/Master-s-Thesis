@@ -116,6 +116,20 @@ class SimulationConfig:
         # === PAPER (Table 1, main.tex) GROUND-TRUTH PARAMETERS ===
         # Spatial / temporal morphological targets
         self.tau_act = 0.5            # Source: Table 1, main.tex — tau_act = 0.5 Pa
+        # SHEAR RANGE (docs/shear_range_and_limits.md). The chamber is not the limit: the same
+        # parallel-plate chamber applied up to 10 Pa (Robotti et al., Biomaterials 2014) and is
+        # described as reaching 12 Pa (Wu et al., Biomaterials 2021). The monolayer is: in this
+        # chamber, flat HUVEC monolayers kept full junction connectivity for 16 h up to 4 Pa
+        # (connectivity index 1.0), and lost it above (0.84 at 5 Pa, 0.43 at 6 Pa, 0.26 at 8 Pa;
+        # Robotti 2014). 4 Pa is also the top of measured arterial systolic peaks (2.5-4.3 Pa;
+        # Reneman and Hoeks 2008). Alignment along the flow kept improving up to 5 Pa and was lost
+        # at 6 Pa (Robotti 2014); at 8 Pa cells from the static state align perpendicular
+        # (Stefopoulos et al., Adv Sci 2022). A gradient chamber found HUVEC aligned only between
+        # about 1 and 2 Pa (Baeyens et al., eLife 2015): the sensitivity case parallel_band_top_pa = 2.
+        self.tau_max_pa = 4.0                 # Pa — top of the justified range: full monolayer integrity (Robotti 2014)
+        self.parallel_band_top_pa = 5.0       # Pa — alignment along the flow improves up to here (Robotti 2014)
+        self.perpendicular_crossover_pa = 6.0  # Pa — alignment lost, isotropic (Robotti 2014, 6 Pa)
+        self.theta_perp_deg = 70.0            # deg — perpendicular plateau as a mean acute angle (90 - 20 deg; Stefopoulos 2022, 8 Pa)
         self.rho_star = 2.3           # Source: Chala et al. 2021 — aspect ratio at the 1.4 Pa plateau (-)
         self.theta_star = 20.0        # deg — healthy-cell orientation at the 1.4 Pa plateau (Chala et al. 2021, 16 h;
         #                               ~21 deg by 8 h in Stefopoulos et al. 2022). Informational: the MPC reads
@@ -170,7 +184,7 @@ class SimulationConfig:
         self.INCLUDE_SUPRAPHYSIOLOGICAL_ARM = False
         #   True : add the high-shear damage term gamma_d*tau^m/(tau_d^m+tau^m)
         #          to the induction rate (see gamma_d/tau_d/m_hill below).
-        #   False (reported): no damage arm. Nothing supports injury in 0-2 Pa:
+        #   False (reported): no damage arm. Nothing supports injury in 0-4 Pa:
         #          7.5 Pa for 24 h is cytoprotective (White et al. 2011), cells stay
         #          attached at 10 Pa for 24 h, and acute erosion needs about 38 Pa
         #          (Fry 1968). The thesis switched it on so that the controller would
@@ -209,14 +223,16 @@ class SimulationConfig:
         #                                 sweepable (like gamma_max); NOT fitted. Chosen so the
         #                                 phi_sen<=0.30 constraint is active over the 6 h window.
         self.tau_d = 1.5           # Pa   [assumed]  damage half-max shear, just above the ~1.4 Pa
-        #                                 physiological optimum (injury onset in the achievable
-        #                                 [0,2] Pa VAD band). Sweepable; NOT fitted.
+        #                                 physiological optimum (injury onset inside the 0-2 Pa cap
+        #                                 the thesis used). Sweepable; NOT fitted.
         self.m_hill = 2            # -    [fixed]    damage Hill exponent (plausible 2-4); fixed at 2.
 
         self.phi_sen_max = 0.30    # -    senescent-fraction limit. With CONSTANT_SENESCENT_FRACTION it is an
-        #                                 admission check on the seeded batch: at the 2 Pa plateau a 25 deg
-        #                                 population alignment needs phi_sen <= 0.30 (healthy 16.5 deg,
-        #                                 senescent 45 deg). Otherwise a hard constraint over the horizon.
+        #                                 admission check on the seeded batch: a 25 deg population alignment
+        #                                 needs phi_sen <= 0.33 at the 4 Pa plateau (healthy 15.1 deg, an
+        #                                 extrapolation) and <= 0.20 at the measured 1.4 Pa (20 deg); senescent
+        #                                 cells stay at 45 deg. The A1 design, 0.30, is admitted at 4 Pa.
+        #                                 Otherwise a hard constraint over the horizon.
 
         # === TELOMERE SENESCENCE PARAMETERS ===
         self.max_divisions = 16  # Source: Table 1, main.tex — N (Hayflick limit, HUVEC) = 16 (midpoint of [15,18] PD)
