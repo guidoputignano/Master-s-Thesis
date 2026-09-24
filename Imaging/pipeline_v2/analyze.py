@@ -47,7 +47,7 @@ GAP_MIN_UM2 = 10.0      # smallest gap counted (fixed before any review; 25 and 
 GAP_OPEN_UM = 0.858     # opening radius: exactly 2 px at 20x and 4 px at 40x (removes inter-cell lines)
 GAP_DARK_PCT = 1.0      # gap pixels are darker than all but this % of cell interiors (per field)
 GAP_GROW_PCT = 5.0      # v2.1: a gap extends over connected pixels darker than this percentile
-GAP_SMOOTH_UM = 1.0     # Gaussian smoothing of the VE-cadherin projection before the darkness test
+GAP_SMOOTH_UM = 1.0     # Gaussian smoothing of the β-catenin projection before the darkness test
 CORE_UM = 2.0           # cell interior = farther than this from any cell boundary
 
 
@@ -111,7 +111,7 @@ def area_filter(mask, um, min_um2):
 def dark_gaps(cells, nuclei, cad, um, pct=GAP_DARK_PCT, nuc_img=None, min_um2=GAP_MIN_UM2):
     """v2 gaps: darker than cell cytoplasm, not inside a nucleated cell, no nucleus inside.
 
-    ``cad`` is the VE-cadherin projection without top-hat (the top-hat removes the
+    ``cad`` is the β-catenin projection without top-hat (the top-hat removes the
     diffuse cytoplasmic signal that separates a cell interior from bare substrate).
     The threshold is the ``pct`` percentile of the per-cell interior medians of the
     same field. A component is rejected if more than 5 % of it is a detected nucleus
@@ -155,7 +155,7 @@ def grow_gaps(seeds, cand, nuclear, um, max_hole_um2=GAP_MIN_UM2):
 
 
 def gap_quality(h1, h2, cad, nuc_img, nuclei, cells, um):
-    """Method-agnostic checks of gap masks: VE-cadherin intensity inside the gaps relative
+    """Method-agnostic checks of gap masks: β-catenin intensity inside the gaps relative
     to the median cell interior (bare substrate should sit far below 1), and the share of
     gap pixels carrying nuclear stain (should be ~0)."""
     smooth = ndimage.gaussian_filter(np.asarray(cad, float), GAP_SMOOTH_UM / um)

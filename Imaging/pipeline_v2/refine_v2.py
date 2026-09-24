@@ -5,14 +5,14 @@ The blind expert review of v2 found two error types. When junctions are faint,
 Cellpose often outlines only the part of a cell around the nucleus ("too small") and
 leaves the rest unassigned. It also produces nucleus-free fragments. v2.1 keeps
 Cellpose's separation of neighbouring cells, but lets each cell grow over the
-VE-cadherin landscape until it meets a junction, as the original watershed did.
+β-catenin landscape until it meets a junction, as the original watershed did.
 
 * markers: Cellpose cells that contain a nucleus; nucleus-free Cellpose cells at least
   as large as the field's median nucleated cell (real cells whose nucleus was missed);
   and nuclei that no Cellpose cell covers (missed cells). Smaller nucleus-free
   fragments are not markers, so their pixels go to the neighbour whose basin they
   belong to;
-* landscape: VE-cadherin top-hat smoothed with sigma = 1 um, so junctions are ridges;
+* landscape: β-catenin top-hat smoothed with sigma = 1 um, so junctions are ridges;
 * mask: every pixel except the gaps. Gap seeds are ``analyze.dark_gaps`` on the Cellpose
   cells, with the nuclear-stain test. Pixels within about 1 um of a detected nucleus (a
   dilation by round(1 um / pixel) steps: 2 px at 20x, 5 px at 40x) are never gap, so every

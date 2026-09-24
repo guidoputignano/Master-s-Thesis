@@ -3,7 +3,7 @@
 
 Two checks. Neither uses a segmentation.
 
-* **Junction clarity.** The VE-cadherin top-hat projection (the image both segmentations
+* **Junction clarity.** The β-catenin top-hat projection (the image both segmentations
   use) is filtered for bright ridges at the junction scale: -lambda_min of the Hessian at
   sigma = 0.6 um, scale-normalised by sigma^2. The field's score is the 95th percentile of
   that ridge strength divided by the image noise (robust MAD of the Laplacian residual,
@@ -13,7 +13,7 @@ Two checks. Neither uses a segmentation.
   magnification. Comparing within a condition keeps flow-induced junction changes out of
   the rule.
 * **Repeated fields.** Two fields of the same condition and magnification that image the
-  same area: phase correlation of the VE-cadherin projections, overlap >= 50 % with
+  same area: phase correlation of the β-catenin projections, overlap >= 50 % with
   correlation >= 0.9 inside the overlap. One of the pair is kept (the higher score), so
   no cell is counted twice.
 

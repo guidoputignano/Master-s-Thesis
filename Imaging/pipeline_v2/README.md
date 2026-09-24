@@ -9,9 +9,14 @@ There are two variants:
 - **v2** (`segment_v2.py`) is Cellpose alone.
 - **v2.1** (`refine_v2.py`) is v2 corrected after the first blind review.
   Cellpose often outlines only the part of a cell around the nucleus when
-  junctions are faint, so v2.1 grows each Cellpose cell over the VE-cadherin
+  junctions are faint, so v2.1 grows each Cellpose cell over the junction
   landscape to its junctions. It drops nucleus-free fragments and gives every
   nucleus without a cell its own marker.
+
+> **Junction stain.** The junction channel (folder `Cadherins`) is
+> **β-catenin**, not VE-cadherin: Nafsika Chala's notes that came with the
+> `.nd2` files list DAPI, β-catenin (mouse) and a Golgi marker (rabbit). The
+> junction channel is called "junction" below.
 
 > **Data handling.** This repository is public and the images are
 > access-restricted (see `data/Costanza/README.md`). Never commit images,
@@ -23,8 +28,8 @@ There are two variants:
 | Step | v1 (notebooks) | v2 (this folder) |
 |---|---|---|
 | Nuclei | Cellpose `cyto3` on the nuclear channel (d = 30 px), intensity/area filter | Cellpose `nuclei`, d = 11.2 µm (26 px at 20x, 52 px at 40x); nuclear top-hat at 20x, projection without top-hat at 40x (the top-hat hollows 40x nuclei) |
-| Whole cells | one watershed region per nuclear seed on the VE-cadherin gradient; seeds merged by a corridor test with per-condition distances (2–25 px) | Cellpose `cyto3` on VE-cadherin + nuclei, d = 25.7 µm (60 px at 20x, 120 px at 40x) |
-| Holes / gaps | histogram-valley threshold, per-folder gating and manual overrides; watershed barrier only at 1.4 Pa | darker than all but 1 % of the field's cell interiors (VE-cadherin without top-hat, σ = 1 µm), outside nucleated cells, opened with r = 0.86 µm (2 px at 20x, 4 px at 40x), >= 10 µm², at most 5 % nuclear pixels; v2.1 grows each gap over connected pixels that pass at the 5th percentile; uncovered area reported separately |
+| Whole cells | one watershed region per nuclear seed on the junction gradient; seeds merged by a corridor test with per-condition distances (2–25 px) | Cellpose `cyto3` on the junction channel + nuclei, d = 25.7 µm (60 px at 20x, 120 px at 40x) |
+| Holes / gaps | histogram-valley threshold, per-folder gating and manual overrides; watershed barrier only at 1.4 Pa | darker than all but 1 % of the field's cell interiors (junction channel without top-hat, σ = 1 µm), outside nucleated cells, opened with r = 0.86 µm (2 px at 20x, 4 px at 40x), >= 10 µm², at most 5 % nuclear pixels; v2.1 grows each gap over connected pixels that pass at the 5th percentile; uncovered area reported separately |
 | Parameters | per condition, some per field | one setting for every condition, in micrometres |
 | Units | pixels (x40 areas divided by 4) | µm, 0.429 µm/px at 20x and 0.2145 µm/px at 40x |
 | Border cells | kept in all statistics | flagged; excluded from morphology and senescence estimates |
@@ -43,7 +48,7 @@ The acquisitions are widefield z-stacks (spinning disk out of the light path;
 "650 × 650 µm at 20x" is the field without the 1.515x lens
 (13 µm × 1024 / 20 = 666 µm); the imaged field is 439 × 439 µm.
 
-**Gaps.** VE-cadherin marks junctions, so a gap and a cell interior look
+**Gaps.** β-catenin marks junctions, so a gap and a cell interior look
 alike in the top-hat image. The difference is the diffuse cytoplasmic signal,
 which bare substrate lacks. The gap rule therefore uses the projection
 without top-hat and a per-field threshold taken from the cells themselves.
@@ -62,7 +67,7 @@ the masks the second review showed; they are also stored as value 8 in
 segmentation.
 
 - *Junction clarity.* Bright ridges are measured at the junction scale on the
-  VE-cadherin top-hat (Hessian, σ = 0.6 µm). The score is their 95th
+  junction top-hat (Hessian, σ = 0.6 µm). The score is their 95th
   percentile divided by the noise (MAD of the Laplacian residual). A field is
   low quality when its log score is more than 3 robust SDs below the median
   of its condition and magnification. Defocus and haze lower the score.
@@ -144,6 +149,20 @@ python analyze.py --root /path/to/data-mt --v2 /private/v2_masks --out /private/
 # 2b. flow direction from the nucleus-to-Golgi vectors (v1 cells, Cellpose nuclei)
 python polarity.py --root /path/to/data-mt --v2 /private/v2r_masks --out /private/polarity \
     --exclude-fields /private/quality.csv
+# 2c. per-cell senescence features (Cellpose nuclei, Golgi, junction signal) for v1 and v2.1 cells
+python cell_features.py --root /path/to/data-mt --masks /private/v2r_masks --analysis /private/v2r_analysis \
+    --quality /private/quality.csv --out /private/features
+# 2d. the .nd2 files: metadata and stage positions, field key -> file, DNA content per nucleus
+python nd2_link.py meta --repo /path/to/data-mt --out /private/nd2
+python nd2_link.py map  --repo /path/to/data-mt --out /private/nd2
+python nd2_link.py dna  --repo /path/to/data-mt --masks /private/v2r_masks --quality /private/quality.csv --out /private/nd2
+# 2e. do gaps sit next to enlarged-nucleus cells more than their size explains? (shifted-mask null)
+python gap_contact.py --root /path/to/data-mt --masks /private/v2r_masks \
+    --features /private/features/features_v1.csv --out /private/gap_contact
+# 2f. every result per shear stress (static, 1.4 Pa), the tables of IMAGING_VALIDATION
+python by_shear.py --analysis /private/v2r_analysis --analysis-v2 /private/v2_analysis \
+    --features /private/features --polarity /private/polarity/polarity_cells.csv \
+    --dna /private/nd2/dna_index.csv --quality /private/quality.csv --root /path/to/data-mt --out /private/by_shear
 # 3. blind yes/no session (one self-contained HTML file) and its scoring
 python build_verdicts.py build --root /path/to/data-mt --v2 /private/v2_masks \
     --analysis /private/v2_analysis --out /private/verdicts
@@ -160,6 +179,13 @@ The data root follows the layout of the data repository:
 `Senescence/<c>/Senescence_Results`, with `<c>` in Static-x20, Static-x40,
 1.4Pa-x20 and 1.4Pa-x40: the A1 experiment. flow3-x20 is not used, because
 its experimental conditions are unknown.
+
+`by_shear.py` pools the clear fields of each shear stress; every field is
+measured in µm at its own pixel size, so pooling needs no rescaling.
+`--group folder` keeps the four folders apart and reproduces the per-folder
+tables, as a check. Its nuclear-size estimate uses `nuclear_mixture.py`, the
+same shifted log-normal model as `senescence.py` on the largest Cellpose
+nucleus of each interior cell.
 
 `analyze.py` writes `cells_v1.csv`, `cells_v2.csv` and `cells_posterior.csv`
 (per cell), `fields.csv` (density, gap fraction, nematic order), `agreement.csv`
@@ -191,7 +217,7 @@ before, with anything within 10 µm of a round-1 object excluded:
 - v2.1 enlarged cells;
 - gaps sampled in proportion to their area.
 
-Each crop has three views: junctions, "haze" (VE-cadherin without top-hat,
+Each crop has three views: junctions, "haze" (the junction channel without top-hat,
 where cytoplasm is grey and bare substrate black) and Golgi.
 
 The page (`index.html`, crops embedded) is answered with Y/N/U. The answers

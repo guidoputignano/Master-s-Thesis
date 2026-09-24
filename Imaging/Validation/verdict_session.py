@@ -130,7 +130,7 @@ input{flex:1;min-width:200px;background:var(--card);color:var(--fg);border:1px s
 textarea{width:100%;box-sizing:border-box;background:var(--card);color:var(--fg);border:1px solid #333;border-radius:6px;padding:7px;font:13px monospace}
 </style></head><body><main>
 <p class="mut">Answer the question for the <b>outlined</b> object (right panel; the left panel is the same crop without outline;
-magenta VE-cadherin, cyan nuclei, bar 10&nbsp;&micro;m). <kbd>Y</kbd> yes &middot; <kbd>N</kbd> no &middot; <kbd>U</kbd> unsure &middot;
+magenta β-catenin, cyan nuclei, bar 10&nbsp;&micro;m). <kbd>Y</kbd> yes &middot; <kbd>N</kbd> no &middot; <kbd>U</kbd> unsure &middot;
 <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> move. Answers are saved in this browser. At the end press <b>Copy answer code</b> and paste it
 into the chat, or <b>Download CSV</b>.</p><p>__NOTE__</p>
 <div class="row"><b id="pos"></b><span id="done" class="mut"></span></div>

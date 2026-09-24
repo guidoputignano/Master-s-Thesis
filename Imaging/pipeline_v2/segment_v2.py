@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Segmentation v2: whole cells and nuclei with Cellpose, one setting for every condition.
 
-Whole cells come from Cellpose ``cyto3`` on two channels: the VE-cadherin top-hat
+Whole cells come from Cellpose ``cyto3`` on two channels: the β-catenin top-hat
 projection (cytoplasm channel) and the nuclear projection (nucleus channel). Nuclei
 come from the Cellpose ``nuclei`` model on the nuclear projection. The expected
 diameters are fixed in micrometres and converted with the calibration in
 ``features.PIXEL_UM``, so 20x and 40x fields are processed at the same physical scale.
 
 There are no per-condition or per-field parameters, no seed merging and no hole
-threshold. Gaps are derived afterwards from the cells, nuclei and VE-cadherin
+threshold. Gaps are derived afterwards from the cells, nuclei and β-catenin
 intensity (``analyze.dark_gaps``).
 
 Inputs follow the data repository layout::
@@ -62,7 +62,7 @@ def diameters_px(key):
 
 
 def inputs(root, cond):
-    """{key: (VE-cadherin path, nuclear path)} for one condition."""
+    """{key: (β-catenin path, nuclear path)} for one condition."""
     def idx(sub, kind):
         d = {}
         for p in sorted(glob.glob(os.path.join(root, 'Projection', cond, sub, kind, '*.tif'))):

@@ -46,7 +46,7 @@ def normalise(img, lo=1, hi=99.8):
 
 
 def composite(membrane, nuclei=None):
-    """VE-cadherin in magenta, nuclei in cyan (same colours as the paper figure)."""
+    """β-catenin in magenta, nuclei in cyan (same colours as the paper figure)."""
     m = normalise(membrane)
     n = normalise(nuclei) if nuclei is not None else np.zeros_like(m)
     return np.clip(np.stack([m, n, np.maximum(m, n)], -1), 0, 1)
@@ -197,7 +197,7 @@ button.on{border-color:var(--acc);color:var(--acc)}
 .mut{color:var(--mut)} kbd{border:1px solid #444;border-radius:3px;padding:0 4px;font-size:12px}
 input{width:100%;box-sizing:border-box;background:var(--card);color:var(--fg);border:1px solid #333;border-radius:6px;padding:6px}
 </style></head><body><main>
-<p class="mut">Left: raw (VE-cadherin magenta, nuclei cyan). Right: the outlined object (yellow) and neighbouring
+<p class="mut">Left: raw (β-catenin magenta, nuclei cyan). Right: the outlined object (yellow) and neighbouring
 territories (grey). Judge the <b>yellow</b> object only. Keys: segmentation <kbd>1</kbd>-<kbd>6</kbd>,
 phenotype <kbd>q</kbd> <kbd>w</kbd> <kbd>e</kbd> <kbd>r</kbd>, <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> to move. Progress is kept in this browser.</p>
 <h3 id="title"></h3><img id="img" alt="cell crop">
@@ -243,7 +243,7 @@ def main(argv=None):
     b = sub.add_parser('build', help='sample cells and write crops + index.html')
     b.add_argument('--cells', nargs='+', required=True)
     b.add_argument('--cells-glob', default='*.tif')
-    b.add_argument('--membrane', nargs='+', required=True, help='VE-cadherin projections')
+    b.add_argument('--membrane', nargs='+', required=True, help='β-catenin projections')
     b.add_argument('--membrane-glob', default='*.tif')
     b.add_argument('--nuclei-img', nargs='+', help='nuclear-channel projections')
     b.add_argument('--nuclei-glob', default='*.tif')

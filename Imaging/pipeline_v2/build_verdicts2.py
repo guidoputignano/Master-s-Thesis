@@ -15,8 +15,8 @@ objects never shown before. Every candidate (cell or gap) whose mask comes withi
   of that condition's gap area that is real, and conditions are combined by gap area.
   Tiny components (which the expert could not judge) are rarely shown.
 
-Views (number keys on the page): 1 junctions (VE-cadherin top-hat + nuclei), 2 haze
-(VE-cadherin without top-hat, low range stretched: cytoplasm is grey, bare substrate is
+Views (number keys on the page): 1 junctions (β-catenin top-hat + nuclei), 2 haze
+(β-catenin without top-hat, low range stretched: cytoplasm is grey, bare substrate is
 black), 3 Golgi (one Golgi per cell helps separate one cell from two).
 
   python build_verdicts2.py --root data-mt --v2r v2r_masks --analysis v2r_analysis \

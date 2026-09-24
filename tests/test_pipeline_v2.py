@@ -522,3 +522,84 @@ def test_golgi_polarity_direction_border_cells_and_offset():
     assert s.loc['0Pa_A1_20x', 'R'] > 0.1 and s.loc['0Pa_A1_20x', 'R_corrected'] < 0.5 * s.loc['0Pa_A1_20x', 'R']
     assert s.loc['1.4Pa_A1_20x', 'R_corrected'] > 0.4
     assert abs(s.loc['1.4Pa_A1_20x', 'direction_corrected_deg'] - 180) < 10
+
+
+def test_nuclear_mixture_recovers_fraction_and_antimode():
+    nm = pytest.importorskip('nuclear_mixture')
+    bs = pytest.importorskip('by_shear')
+    rng = np.random.default_rng(4)
+    x = np.log(np.concatenate([rng.lognormal(np.log(67), 0.2, 2100), rng.lognormal(np.log(125), 0.2, 900)]))
+    f = nm.fit(x)
+    assert abs(f['frac_enlarged'] - 0.30) < 0.03 and abs(f['ratio'] - 125 / 67) < 0.08
+    assert f['bic1'] - f['bic2'] > 50
+    t = bs.antimode(f['params'])
+    assert 67 < t < 125
+    one = nm.fit(np.log(rng.lognormal(np.log(67), 0.2, 3000)))
+    assert one['bic1'] - one['bic2'] < 10                       # one population: no support for two
+
+
+def test_by_shear_pools_folders_by_shear_stress():
+    bs = pytest.importorskip('by_shear')
+    df = pd.DataFrame(dict(condition=['0Pa_A1_20x', '0Pa_A1_40x', '1.4Pa_A1_20x', '1.4Pa_A1_40x'],
+                           key=['0Pa_A1_19dec21_20xA_x_seq001', '0Pa_A1_19dec21_40x_x_seq001',
+                                '1.4Pa_A1_20dec21_20xA_x_seq001', '1.4Pa_A1_20dec21_40x_x_seq001']))
+    s, f = bs.Grouping('shear'), bs.Grouping('folder')
+    assert list(s.label(df).grp) == ['Static', 'Static', '1.4 Pa', '1.4 Pa']
+    assert list(f.label(df).grp) == list(df.condition)
+    assert list(s.label(df).date) == ['19dec21', '19dec21', '20dec21', '20dec21']
+    assert s.static_of('1.4 Pa') == 'Static' and f.static_of('1.4Pa_A1_40x') == '0Pa_A1_40x'
+
+
+def test_gap_contact_null_detects_gaps_placed_next_to_enlarged_cells():
+    gc = pytest.importorskip('gap_contact')
+    cells = np.zeros((120, 120), np.int32)
+    lab = 0
+    for i in range(6):
+        for j in range(6):
+            lab += 1
+            cells[20 * i:20 * i + 20, 20 * j:20 * j + 20] = lab
+    labels = np.arange(1, lab + 1)
+    enlarged = np.isin(labels, np.random.default_rng(1).choice(labels, 6, replace=False))
+    gaps = np.zeros(cells.shape, bool)
+    for l in labels[enlarged]:                                   # a small gap inside each enlarged cell
+        yy, xx = np.nonzero(cells == l)
+        cy, cx = int(yy.mean()), int(xx.mean())
+        gaps[cy - 2:cy + 2, cx - 2:cx + 2] = True
+    obs, null, ne, nn = gc.field_null(cells, gaps, labels, enlarged, 0.5, 200, np.random.default_rng(0))
+    assert ne == 6 and nn == 30 and obs == (6, 0)
+    share_null = null[:, 0] / np.maximum(null.sum(1), 1)
+    assert (np.sum(share_null >= 1.0) + 1) / 201 < 0.05          # the observed share (1.0) is rare by geometry
+    assert np.median(share_null) < 0.4
+
+
+def test_nd2_dna_index_puts_doubled_dna_at_4n():
+    nl = pytest.importorskip('nd2_link')
+    rng = np.random.default_rng(5)
+    area = np.r_[rng.normal(65, 5, 200), rng.normal(130, 10, 60)]
+    dna = np.r_[rng.normal(1.0, 0.08, 200), rng.normal(2.0, 0.12, 60)] * 5e4
+    d = pd.DataFrame(dict(key='k', label=np.arange(260), area_um2=area, dna_raw=dna))
+    out = nl.dna_index(d)
+    assert abs(out[~out.enlarged].dna.median() - 1.0) < 0.05
+    assert (out[out.enlarged].cls == '4N').mean() > 0.9 and (out[~out.enlarged].cls == '2N').mean() > 0.9
+    # the summed-DAPI step: a nucleus twice as bright integrates to twice the signal
+    nuclei = np.zeros((60, 60), np.int32)
+    yy, xx = np.mgrid[:60, :60]
+    nuclei[(yy - 15) ** 2 + (xx - 15) ** 2 <= 36] = 1
+    nuclei[(yy - 45) ** 2 + (xx - 45) ** 2 <= 36] = 2
+    stack = np.full((5, 60, 60), 10.0)
+    stack[:, nuclei == 1] += 100
+    stack[:, nuclei == 2] += 200
+    s = nl.dna_sums(stack, nuclei, 1.0).set_index('label')
+    assert abs(s.dna_raw[2] / s.dna_raw[1] - 2.0) < 0.05
+
+
+def test_cell_features_neighbours_on_a_grid():
+    cf = pytest.importorskip('cell_features')
+    cells = np.zeros((30, 30), np.int32)
+    lab = 0
+    for i in range(3):
+        for j in range(3):
+            lab += 1
+            cells[10 * i:10 * i + 10, 10 * j:10 * j + 10] = lab
+    nb = cf.neighbours(cells)
+    assert nb[5] == 8 and nb[1] == 3 and nb[2] == 5              # centre, corner, edge (8-connectivity)
