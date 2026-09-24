@@ -1130,56 +1130,77 @@ def _build_animation(frames, out_dir):
 
 
 def _summary_plots(log, out_dir):
-    """Produce the three summary figures (tau, phi_sen, morphology)."""
+    """Summary figures of a closed-loop run, one measure per axis.
+
+    Writes mpc_tau_trajectory.pdf (the applied input), mpc_aspect_ratio.pdf and
+    mpc_alignment.pdf (population mean and healthy cells, with the healthy-cell
+    target at the final input dotted), and mpc_phi_sen.pdf (the senescent
+    fraction and the 0.30 limit). Colours are categorical slots 1-2 of a palette
+    checked for colour-vision deficiency; lines carry direct labels.
+    """
     import matplotlib.pyplot as plt
 
+    blue, orange = '#2a78d6', '#eb6834'
+    ink, muted = '#0b0b0b', '#52514e'
+    style = {'font.size': 9, 'axes.labelsize': 9, 'xtick.labelsize': 8, 'ytick.labelsize': 8,
+             'axes.edgecolor': muted, 'axes.linewidth': 0.6, 'xtick.color': muted,
+             'ytick.color': muted, 'axes.labelcolor': ink, 'pdf.fonttype': 42}
     t = np.asarray(log['t_h'])          # hour boundaries 0..n
     tau = np.asarray(log['tau'])        # applied input per step (len n)
     phi = np.asarray(log['phi_sen'])    # len n+1
     rho = np.asarray(log['rho_bar'])    # len n+1
+    rho_h = np.asarray(log.get('healthy_rho', [np.nan] * len(t)))
     varphi_deg = np.degrees(np.asarray(log['varphi_bar']))
-
-    # tau trajectory (step function); tau[k] held on [t_k, t_{k+1})
-    fig, ax = plt.subplots(figsize=(5, 3.2))
-    ax.step(np.append(t[:-1], t[-1]), np.append(tau, tau[-1]), where='post')
-    ax.set_xlabel('time (h)')
-    ax.set_ylabel(r'wall shear stress $\tau$ (Pa)')
-    ax.set_ylim(-0.05, 2.05)
-    fig.tight_layout(); fig.savefig(os.path.join(out_dir, 'mpc_tau_trajectory.pdf'),
-                                    format='pdf', bbox_inches='tight'); plt.close(fig)
-
-    # phi_sen with constraint line
-    fig, ax = plt.subplots(figsize=(5, 3.2))
-    ax.plot(t, phi, marker='o', ms=3)
-    ax.axhline(0.30, ls='--', color='k', lw=1)
-    ax.set_xlabel('time (h)')
-    ax.set_ylabel(r'senescent fraction $\phi_{\mathrm{sen}}$')
-    ax.set_ylim(0.0, 0.35)
-    fig.tight_layout(); fig.savefig(os.path.join(out_dir, 'mpc_phi_sen.pdf'),
-                                    format='pdf', bbox_inches='tight'); plt.close(fig)
-
-    # morphology: rho_bar and alignment (deg) on twin axes
     halign_deg = np.degrees(np.asarray(log['healthy_align']))
-    fig, ax1 = plt.subplots(figsize=(5, 3.2))
-    l1, = ax1.plot(t, rho, marker='o', ms=3, color='C0', label=r'$\bar{\rho}$')
-    ax1.axhline(RHO_FLOW, ls=':', color='C0', lw=1)
-    ax1.set_xlabel('time (h)')
-    ax1.set_ylabel(r'mean aspect ratio $\bar{\rho}$', color='C0')
-    ax1.tick_params(axis='y', labelcolor='C0')
-    ax2 = ax1.twinx()
-    # population-mean alignment (main.tex phi_bar over all cells) and the
-    # healthy-cell alignment diagnostic; the dotted line is the healthy-cell
-    # plateau measured at 1.4 Pa (20 deg)
-    l2, = ax2.plot(t, varphi_deg, marker='s', ms=3, color='C3',
-                   label=r'$\bar{\varphi}$ (all cells)')
-    l3, = ax2.plot(t, halign_deg, marker='^', ms=3, color='C1', ls='--',
-                   label=r'$\bar{\varphi}_{\mathrm{healthy}}$')
-    ax2.axhline(THETA_FLOW_DEG, ls=':', color='C1', lw=1)
-    ax2.set_ylabel(r'flow alignment (deg)', color='C3')
-    ax2.tick_params(axis='y', labelcolor='C3')
-    ax1.legend(handles=[l1, l2, l3], loc='best')
-    fig.tight_layout(); fig.savefig(os.path.join(out_dir, 'mpc_morphology.pdf'),
-                                    format='pdf', bbox_inches='tight'); plt.close(fig)
+    size = (8.6 / 2.54, 5.6 / 2.54)
+
+    step = max(1, int(round(t[-1] / 4)))
+    ticks = np.arange(0, t[-1] + 0.5, step)
+
+    def finish(ax, fig, name, ylabel):
+        ax.set_xlabel('time (h)')
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(ticks)
+        ax.set_xlim(0, t[-1] * 1.18)
+        ax.spines[['top', 'right']].set_visible(False)
+        fig.tight_layout()
+        fig.savefig(os.path.join(out_dir, name), format='pdf', bbox_inches='tight')
+        plt.close(fig)
+
+    def label_end(ax, y, text, dy=0.0):
+        ax.text(t[-1] * 1.02, y[-1] + dy, text, color=ink, va='center', fontsize=8)
+
+    with plt.rc_context(style):
+        # input: step function, tau[k] held on [t_k, t_{k+1})
+        fig, ax = plt.subplots(figsize=size)
+        ax.step(np.append(t[:-1], t[-1]), np.append(tau, tau[-1]), where='post', color=blue, lw=1.5)
+        ax.set_ylim(-0.05, 2.1)
+        finish(ax, fig, 'mpc_tau_trajectory.pdf', 'wall shear stress (Pa)')
+
+        fig, ax = plt.subplots(figsize=size)
+        ax.plot(t, rho, color=blue, lw=1.5, marker='o', ms=2.5)
+        label_end(ax, rho, 'all cells')
+        if np.isfinite(rho_h).any():
+            ax.plot(t, rho_h, color=orange, lw=1.5, ls='--')
+            label_end(ax, rho_h, 'healthy cells', dy=0.03)
+        ax.axhline(RHO_FLOW, color=muted, lw=0.6, ls=':')
+        ax.set_ylim(1.85, 2.45)
+        finish(ax, fig, 'mpc_aspect_ratio.pdf', 'mean aspect ratio')
+
+        fig, ax = plt.subplots(figsize=size)
+        ax.plot(t, varphi_deg, color=blue, lw=1.5, marker='o', ms=2.5)
+        label_end(ax, varphi_deg, 'all cells')
+        ax.plot(t, halign_deg, color=orange, lw=1.5, ls='--')
+        label_end(ax, halign_deg, 'healthy cells')
+        ax.axhline(THETA_FLOW_DEG, color=muted, lw=0.6, ls=':')
+        ax.set_ylim(0, 50)
+        finish(ax, fig, 'mpc_alignment.pdf', 'mean angle to the flow (deg)')
+
+        fig, ax = plt.subplots(figsize=size)
+        ax.plot(t, phi, color=blue, lw=1.5, marker='o', ms=2.5)
+        ax.axhline(0.30, ls='--', color=muted, lw=0.8)
+        ax.set_ylim(0.0, 0.35)
+        finish(ax, fig, 'mpc_phi_sen.pdf', 'senescent fraction')
 
 
 def _build_dashboard(frames, ts, mpc, out_dir):
@@ -1189,18 +1210,18 @@ def _build_dashboard(frames, ts, mpc, out_dir):
 
     t = np.asarray(ts['t_h'])
     tau = np.asarray(ts['tau'])
-    phi = np.asarray(ts['phi_sen'])
     rho = np.asarray(ts['rho_bar'])
     varphi_deg = np.degrees(np.asarray(ts['varphi_bar']))
     halign_deg = np.degrees(np.asarray(ts['healthy_align']))
     tmax = max(1.0, float(t[-1]))
 
+    blue, orange, aqua = '#2a78d6', '#eb6834', '#1baf7a'
     fig = plt.figure(figsize=(11, 5))
     gs = fig.add_gridspec(3, 2, width_ratios=[1.05, 1.0], hspace=0.45, wspace=0.28)
     ax_img = fig.add_subplot(gs[:, 0])
     ax_tau = fig.add_subplot(gs[0, 1])
-    ax_phi = fig.add_subplot(gs[1, 1])
-    ax_mor = fig.add_subplot(gs[2, 1])
+    ax_rho = fig.add_subplot(gs[1, 1])
+    ax_ang = fig.add_subplot(gs[2, 1])
 
     ax_img.set_xticks([]); ax_img.set_yticks([])
     ax_img.set_xlabel('tessellation (healthy / stress-sen / telomere-sen)')
@@ -1208,24 +1229,22 @@ def _build_dashboard(frames, ts, mpc, out_dir):
     txt = ax_img.text(0.02, 0.98, '', transform=ax_img.transAxes, va='top', ha='left',
                       fontsize=9, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
-    # static reference lines / full faint trajectories
-    for ax in (ax_tau, ax_phi, ax_mor):
+    # one measure per axis; the senescent fraction is in the text box
+    for ax in (ax_tau, ax_rho, ax_ang):
         ax.set_xlim(0, tmax)
-    ax_tau.set_ylim(-0.05, 2.05); ax_tau.set_ylabel(r'$\tau$ (Pa)')
-    ax_phi.set_ylim(0, 0.35); ax_phi.set_ylabel(r'$\phi_{\mathrm{sen}}$')
-    ax_phi.axhline(0.30, ls='--', color='k', lw=1)
-    ax_mor.set_ylabel('align (deg)'); ax_mor.set_xlabel('time (h)')
-    ax_mor.axhline(THETA_FLOW_DEG, ls=':', color='C1', lw=1)
-    ax_mor.set_ylim(0, max(55, float(np.nanmax(varphi_deg)) + 5))
-    ax_tau_r = ax_mor.twinx(); ax_tau_r.set_ylabel(r'$\bar{\rho}$', color='C0')
-    ax_tau_r.set_ylim(1.8, 2.4); ax_tau_r.tick_params(axis='y', labelcolor='C0')
+        ax.spines[['top', 'right']].set_visible(False)
+    ax_tau.set_ylim(-0.05, 2.1); ax_tau.set_ylabel(r'$\tau$ (Pa)')
+    ax_rho.set_ylim(1.8, 2.5); ax_rho.set_ylabel('aspect ratio')
+    ax_rho.axhline(RHO_FLOW, ls=':', color='0.4', lw=0.8)
+    ax_ang.set_ylabel('angle (deg)'); ax_ang.set_xlabel('time (h)')
+    ax_ang.axhline(THETA_FLOW_DEG, ls=':', color='0.4', lw=0.8)
+    ax_ang.set_ylim(0, max(55, float(np.nanmax(varphi_deg)) + 5))
 
-    (ln_tau,) = ax_tau.plot([], [], color='C2', drawstyle='steps-post')
-    (ln_phi,) = ax_phi.plot([], [], color='C4', marker='', lw=1.5)
-    (ln_va,) = ax_mor.plot([], [], color='C3', lw=1.5, label=r'$\bar{\varphi}$ all')
-    (ln_ha,) = ax_mor.plot([], [], color='C1', ls='--', lw=1.5, label=r'$\bar{\varphi}$ healthy')
-    (ln_rho,) = ax_tau_r.plot([], [], color='C0', lw=1.5, label=r'$\bar{\rho}$')
-    ax_mor.legend(loc='upper right', fontsize=7)
+    (ln_tau,) = ax_tau.plot([], [], color=aqua, drawstyle='steps-post', lw=1.5)
+    (ln_rho,) = ax_rho.plot([], [], color=blue, lw=1.5, label='all cells')
+    (ln_va,) = ax_ang.plot([], [], color=blue, lw=1.5, label='all cells')
+    (ln_ha,) = ax_ang.plot([], [], color=orange, ls='--', lw=1.5, label='healthy cells')
+    ax_ang.legend(loc='upper right', fontsize=7, frameon=False)
 
     def update(i):
         f = frames[i]
@@ -1234,11 +1253,10 @@ def _build_dashboard(frames, ts, mpc, out_dir):
         txt.set_text(rf"$t={f['t_h']:.2f}$ h   $\tau={f['tau']:.2f}$ Pa   "
                      rf"$\phi_{{sen}}={f['phi_sen']:.2f}$")
         ln_tau.set_data(t[:n], tau[:n])
-        ln_phi.set_data(t[:n], phi[:n])
+        ln_rho.set_data(t[:n], rho[:n])
         ln_va.set_data(t[:n], varphi_deg[:n])
         ln_ha.set_data(t[:n], halign_deg[:n])
-        ln_rho.set_data(t[:n], rho[:n])
-        return im, txt, ln_tau, ln_phi, ln_va, ln_ha, ln_rho
+        return im, txt, ln_tau, ln_rho, ln_va, ln_ha
 
     anim = animation.FuncAnimation(fig, update, frames=len(frames), blit=False)
     mp4 = os.path.join(out_dir, 'mpc_dashboard.mp4')
@@ -1367,7 +1385,7 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
 
     # step-resolution log (hour boundaries) and sub-frame time series (for the dashboard)
     log = {'t_h': [0.0], 'tau': [], 'phi_sen': [], 'rho_bar': [], 'varphi_bar': [],
-           'healthy_align': []}
+           'healthy_align': [], 'healthy_rho': []}
     ts = {'t_h': [], 'tau': [], 'phi_sen': [], 'rho_bar': [], 'varphi_bar': [],
           'healthy_align': []}
     frames = []
@@ -1385,6 +1403,7 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
     log['rho_bar'].append(rho0)
     log['varphi_bar'].append(varphi0)
     log['healthy_align'].append(flow_alignment_angle(x_state['theta_h']))
+    log['healthy_rho'].append(float(x_state['rho_h']))
     print(f"▶ MPC start: phi_sen={phi0:.3f}, rho_bar={rho0:.3f}, "
           f"varphi_bar={np.degrees(varphi0):.1f} deg, "
           f"healthy_align={np.degrees(flow_alignment_angle(x_state['theta_h'])):.1f} deg")
@@ -1469,10 +1488,18 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
         log['rho_bar'].append(rho_m)
         log['varphi_bar'].append(varphi_m)
         log['healthy_align'].append(halign_m)
+        log['healthy_rho'].append(float(x_state['rho_h']))
         u_prev = tau_k
         print(f"  step {k:02d}: tau={tau_k:.3f} Pa  (SLSQP {status}, J={res.fun:.3f})  "
               f"phi_sen={phi_m:.3f}  rho_bar={rho_m:.3f}  "
               f"healthy_align={np.degrees(halign_m):.1f} deg")
+
+    # the state at the end of the run, as a last frame
+    if n_control_steps:
+        path = os.path.join(frames_dir, f"mpc_k{n_control_steps:02d}_t00.pdf")
+        arr = _render_frame(simulator.grid, tau_k, float(n_control_steps), phi_m, path)
+        frames.append({'arr': arr.copy(), 't_h': float(n_control_steps), 'tau': tau_k,
+                       'phi_sen': phi_m, 'snap': len(ts['t_h']), 'path': path})
 
     # assemble outputs
     print(f"🎞️  Assembling tessellation animation from {len(frames)} frames ...")

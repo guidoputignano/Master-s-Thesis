@@ -69,6 +69,22 @@ The first move stops short of 2 Pa because of the move penalty w_u.
 - **Duration.** The time to 90 % / 95 % of the change is 6.9 / 9.0 h for τ = 3 h,
   13.8 / 18 h for τ = 6 h and 18.4 / 24 h for τ = 8 h. Dense monolayers, such as A1,
   need longer.
+- **The 2 Pa target is extrapolated.** The plateau was measured at 1.4 Pa only; the
+  2 Pa targets come from the shear gate s(τ) = 1 − exp(−(τ − τ_act)/τ_act), with
+  τ_act = 0.5 Pa. For τ_act from 0.3 to 0.7 Pa the healthy-cell target at 2 Pa runs
+  from 19.4° to 11.6°, and the share a 25° population target admits from 22 % to
+  40 %. Without the extrapolation, at the measured 1.4 Pa, a 25° target admits
+  20 %. Measuring the plateau at 2 Pa would remove this uncertainty.
+
+## The paper run (12 h)
+
+`python -m endothelial_simulation.run_mpc --steps 12 --out results/paper_run/20260924-realistic`
+runs the reported model for twice the A1 flow (seed 42, φ_sen(0) = 0.302, 54 of
+179 cells). The input is 1.78 Pa in the first hour, then 2 Pa. The healthy cells
+reach 20.4° and aspect ratio 2.29 at 6 h, and 17.1° and 2.35 at 12 h (targets
+16.5° and 2.36). The population reaches 27.8° and 2.21 at 6 h, and 25.5° and 2.24
+at 12 h. The folder holds the frames, the animation, the dashboard, the four
+summary figures and `log.json`; the paper's Figs. 5–6 come from it.
 
 ## What this leaves open
 
@@ -89,8 +105,8 @@ The first move stops short of 2 Pa because of the move penalty w_u.
 
 ## Verification
 
-- `pytest tests`: 67 passed. A new test checks that the population is held, that
-  the cap is an admission check (a 50 % batch fails it), and that the controller
-  reaches 2 Pa. The seed-sensitivity test now runs the evolving-population mode,
+- `pytest tests`: 67 passed at this change, 72 with the imaging tests added since.
+  A new test checks that the population is held, that the cap is an admission check
+  (a 50 % batch fails it), and that the controller reaches 2 Pa. The seed-sensitivity test now runs the evolving-population mode,
   because with an inherited fraction the logged outputs no longer depend on the
   layout seed.

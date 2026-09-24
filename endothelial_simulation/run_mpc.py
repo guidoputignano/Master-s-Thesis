@@ -6,13 +6,17 @@ Pipeline:
      Table-1 parameters (areas in physical um^2, gap-free Voronoi tessellation).
   2. Set the initial senescent composition phi_sen(0) = 0.30 (the A1 design),
      all stress-induced (handled inside Simulator.initialize()).
-  3. Run the receding-horizon MPC (run_mpc_simulation) for 6 control steps.
-  4. Save the 24 tessellation frames, the assembled animation, and the three
-     summary figures under endothelial_simulation/figures/.
+  3. Run the receding-horizon MPC (run_mpc_simulation), by default for 12
+     one-hour steps: twice the 6 h A1 flow, long enough to show the approach to
+     the plateau (95 % of the change after 9 h with the 3 h constant).
+  4. Save the tessellation frames, the assembled animation, the summary figures
+     and the log (log.json) under endothelial_simulation/figures/ or --out.
 
 Usage:
-    python -m endothelial_simulation.run_mpc
+    python -m endothelial_simulation.run_mpc [--steps 12] [--out DIR]
 """
+import argparse
+import json
 import os
 import matplotlib
 matplotlib.use('Agg')  # headless rendering
@@ -35,10 +39,9 @@ def build_config():
     return config
 
 
-def main(n_control_steps=24):
-    # ~24 h conditioning so the morphology converges to the flow-adapted plateau
-    # (single morphological adaptation constant tau_adapt = tau_orient = 3 h).
-    # Each step is a 1 h receding-horizon decision.
+def main(n_control_steps=12, output_dir=None):
+    # Each step is a 1 h receding-horizon decision; with the single morphological
+    # adaptation constant tau_adapt = tau_orient = 3 h, 12 h reach the plateau.
     config = build_config()
 
     print("=" * 70)
@@ -54,7 +57,8 @@ def main(n_control_steps=24):
     simulator.set_constant_input(0.0)    # static baseline initial condition (0 Pa)
     simulator.initialize()
 
-    output_dir = os.path.join(os.path.dirname(__file__), 'figures')
+    if output_dir is None:
+        output_dir = os.path.join(os.path.dirname(__file__), 'figures')
 
     # 3-4. Run MPC and write frames / animation / summary plots
     results = run_mpc_simulation(
@@ -63,13 +67,22 @@ def main(n_control_steps=24):
         output_dir=output_dir,
     )
 
+    with open(os.path.join(output_dir, 'log.json'), 'w') as fh:
+        json.dump({'log': results['log'], 'admitted': results['admitted'], 'seed': results['seed'],
+                   'phi_sen0': config.initial_senescent_fraction}, fh, indent=1)
+
     print("\n✅ MPC run complete.")
     print(f"   frames    : {len(results['frames'])} PDFs in {output_dir}/frames")
     print(f"   animation : {results['animation']}")
     print(f"   dashboard : {results['dashboard']}")
-    print(f"   summaries : mpc_tau_trajectory.pdf, mpc_phi_sen.pdf, mpc_morphology.pdf")
+    print(f"   summaries : mpc_tau_trajectory.pdf, mpc_aspect_ratio.pdf, mpc_alignment.pdf, "
+          f"mpc_phi_sen.pdf, log.json")
     return results
 
 
 if __name__ == '__main__':
-    main()
+    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    ap.add_argument('--steps', type=int, default=12, help='one-hour control steps')
+    ap.add_argument('--out', help='output folder (default endothelial_simulation/figures)')
+    a = ap.parse_args()
+    main(a.steps, a.out)

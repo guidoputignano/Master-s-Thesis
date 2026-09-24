@@ -127,9 +127,9 @@ def figure(path_noext):
     a.legend(frameon=False, loc='lower right')
     a.set_title('a', loc='left', fontweight='bold')
     t = np.linspace(0, 16, 161)
-    for (p, tau_h, c, lab, dy) in ((0.0, 3.0, blue, 'no senescent cells, \u03c4 = 3 h', 0.0),
-                                   (0.3, 3.0, orange, '30 % senescent, \u03c4 = 3 h', -1.3),
-                                   (0.3, 6.0, aqua, '30 % senescent, \u03c4 = 6 h (dense)', 1.3)):
+    for (p, tau_h, c, lab, dy) in ((0.0, 3.0, blue, r'no senescent cells, $T_{\rm adapt}$ = 3 h', 0.0),
+                                   (0.3, 3.0, orange, r'30 % senescent, $T_{\rm adapt}$ = 3 h', -1.3),
+                                   (0.3, 6.0, aqua, r'30 % senescent, $T_{\rm adapt}$ = 6 h (dense)', 1.3)):
         y = population_alignment(t, 2.0, p, tau_h)
         b.plot(t, y, color=c, lw=1.5, label=lab)
         b.text(16.3, y[-1] + dy, f'{y[-1]:.0f}°', color=ink, va='center', fontsize=8)
