@@ -66,7 +66,7 @@ class TemporalDynamicsModel:
 
         # Paper (Table 1, main.tex) temporal-dynamics parameters
         self.tau_act = getattr(config, 'tau_act', 0.5)              # Source: Table 1, main.tex — tau_act = 0.5 Pa
-        self.tau_adapt_hours = getattr(config, 'tau_adapt_hours', 9.0)  # Source: Table 1, main.tex — tau_adapt = 6-12 h
+        self.tau_adapt_hours = getattr(config, 'tau_adapt_hours', 3.0)  # h — single morphological constant (config.py)
 
         # Calculate linear model parameters for A_max
         P_known = np.array(list(self.A_max_map.keys()))
@@ -108,20 +108,22 @@ class TemporalDynamicsModel:
 
     def gated_target(self, y_stat, y_flow, tau, tau_act=None):
         """
-        Gated interpolation target y*(tau) of eq:target (main.tex):
+        Gated interpolation target y*(tau) of eq:target (main.tex), as in the
+        reported model (control/mpc_controller.py):
 
-            y*(tau) = y_stat + (y_flow - y_stat) * s(tau)
+            y*(tau) = y_stat + (y_flow - y_stat) * s(tau) / s(1.4 Pa)
 
         Parameters:
             y_stat: static (no-flow) baseline value
-            y_flow: flow-adapted plateau value
+            y_flow: flow plateau value, as measured at 1.4 Pa
             tau:    wall shear stress (Pa)
             tau_act: activation threshold (Pa)
 
         Returns:
             Stimulus-dependent target value.
         """
-        return y_stat + (y_flow - y_stat) * self.s_activation(tau, tau_act)
+        from ..control.mpc_controller import _gated   # one implementation of eq:target
+        return _gated(y_stat, y_flow, tau, self.tau_act if tau_act is None else tau_act)
 
     def relax_step(self, y, y_target, dt, tau_adapt=None):
         """
@@ -139,7 +141,7 @@ class TemporalDynamicsModel:
             Updated value after dt.
         """
         if tau_adapt is None:
-            tau_adapt = self.tau_adapt_hours  # Source: Table 1, main.tex — tau_adapt = 6-12 h
+            tau_adapt = self.tau_adapt_hours  # h — config.tau_adapt_hours (3 h)
         return y_target - (y_target - y) * np.exp(-dt / tau_adapt)
 
     def orientation_step(self, theta, theta_target, dt, tau_adapt=None):
@@ -194,7 +196,7 @@ class TemporalDynamicsModel:
         """
         DEPRECATED (legacy path B): not used by run_mpc_simulation / the reported
         model. The reported dynamics use a single fixed morphological adaptation
-        time constant (7.4 h; tau_orient = tau_adapt), not tau = tau_base * A_max**lambda_scale.
+        time constant (3 h; tau_orient = tau_adapt), not tau = tau_base * A_max**lambda_scale.
         Retained only for the legacy CLI simulation modes and sensitivity scripts.
 
         Calculate the time constant based on A_max.

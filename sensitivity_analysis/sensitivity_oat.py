@@ -2,7 +2,7 @@
 Part A - One-at-a-time (OAT) sensitivity of the temporal-dynamics scale.
 
 Implements the calibrated temporal-dynamics component of the paper (main.tex):
-    eq:target      y*(tau) = y_stat + (y_flow - y_stat) * s(tau)   [gated]
+    eq:target      y*(tau) = y_stat + (y_flow - y_stat) * s(tau) / s(1.4 Pa)   [gated]
     eq:relaxation  dy/dt   = (y*(tau) - y) / tau_adapt
     eq:stepsolution y(t)   = y*(tau) - (y*(tau) - y0) * exp(-t/tau_adapt)
     eq:orientation theta relaxes on the circle toward theta*(tau)
@@ -13,17 +13,21 @@ gated_target, relax_step), so the analysis is built directly on the corrected
 models. All quantities are in the paper's units (hours, Pa, degrees).
 
 Parameters swept (one at a time, others at nominal Table-1 values):
-    tau_adapt  in [6, 7.5, 9, 10.5, 12] h
+    tau_adapt  in [2, 2.5, 3, 3.5, 4] h
     rho*       over +/-15% around 2.3
     theta*     over +/-15% around 20 deg
     tau_act    in [0.3, 0.4, 0.5, 0.6, 0.7] Pa
+The static baselines and the flow values are the reported model's (Chala et al.
+2021: aspect ratio 1.9 -> 2.3, orientation 45 -> 20 deg at 1.4 Pa). Because the
+flow values are the targets at 1.4 Pa, tau_act does not change the response at
+that input; it only shapes the targets at other shear levels.
 
 Outputs (figures/):
     oat_envelope_tau_adapt.pdf   aspect-ratio rho(t) envelope vs tau_adapt
     oat_envelope_theta_star.pdf  alignment phi(t) envelope vs theta*
     oat_sensitivity_bars.pdf     normalised sensitivity indices (bar chart)
-    oat_monolayer_fast.pdf       monolayer snapshot at t=6 h, tau_adapt = 6 h
-    oat_monolayer_slow.pdf       monolayer snapshot at t=6 h, tau_adapt = 12 h
+    oat_monolayer_fast.pdf       monolayer snapshot at t=6 h, tau_adapt = 2 h
+    oat_monolayer_slow.pdf       monolayer snapshot at t=6 h, tau_adapt = 4 h
 """
 
 import os
@@ -37,6 +41,9 @@ import matplotlib.pyplot as plt
 
 from endothelial_simulation.config import SimulationConfig
 from endothelial_simulation.models import TemporalDynamicsModel
+from endothelial_simulation.control.mpc_controller import (
+    RHO_STAT, RHO_FLOW, THETA_STAT_DEG, THETA_FLOW_DEG, TAU_FLOW_PA,
+)
 
 # ----------------------------------------------------------------------------
 # Reproducibility and journal style
@@ -75,19 +82,19 @@ def set_style():
 # ----------------------------------------------------------------------------
 # Nominal Table-1 values (paper units)
 # ----------------------------------------------------------------------------
+_CFG = SimulationConfig()
 NOMINAL = {
-    "tau_adapt": 9.0,   # Source: Table 1, main.tex — tau_adapt = 6-12 h (nominal midpoint)
-    "rho_star": 2.3,    # Source: Table 1, main.tex — rho* = 2.3
-    "theta_star": 20.0,  # Source: Table 1, main.tex — theta* = 20 degrees
-    "tau_act": 0.5,     # Source: Table 1, main.tex — tau_act = 0.5 Pa
+    "tau_adapt": _CFG.tau_adapt_hours,  # h — single morphological constant (config.py, 3 h)
+    "rho_star": RHO_FLOW,               # aspect ratio at the 1.4 Pa plateau (2.3)
+    "theta_star": THETA_FLOW_DEG,       # healthy-cell orientation at the 1.4 Pa plateau (20 deg)
+    "tau_act": _CFG.tau_act,            # Source: Table 1, main.tex — tau_act = 0.5 Pa
 }
 
-TAU_INPUT = 1.4         # Source: Table 1, main.tex — flow-adapted shear tau_opt = 1.4 Pa
+TAU_INPUT = TAU_FLOW_PA  # Pa — the conditioning shear, where the plateau was measured
 T_HORIZON = 6.0         # six-hour conditioning horizon
-RHO_STATIC = 1.0        # isotropic (no-flow) baseline aspect ratio
-PHI_ISO = 45.0          # isotropic mean alignment angle (degrees)
+RHO_STATIC = RHO_STAT   # static baseline aspect ratio (1.9)
+PHI_ISO = THETA_STAT_DEG  # isotropic mean alignment angle (45 degrees)
 
-_CFG = SimulationConfig()
 _TM = TemporalDynamicsModel(_CFG)   # corrected temporal model (provides eq:target/relaxation)
 
 
@@ -123,7 +130,7 @@ def simulate_temporal(tau_adapt, rho_star, theta_star, tau_act,
 # Parameter sweeps
 # ----------------------------------------------------------------------------
 SWEEPS = {
-    "tau_adapt": [6.0, 7.5, 9.0, 10.5, 12.0],
+    "tau_adapt": [2.0, 2.5, 3.0, 3.5, 4.0],
     "rho_star": list(np.round(np.linspace(2.3 * 0.85, 2.3 * 1.15, 5), 4)),
     "theta_star": list(np.round(np.linspace(20.0 * 0.85, 20.0 * 1.15, 5), 4)),
     "tau_act": [0.3, 0.4, 0.5, 0.6, 0.7],
@@ -309,8 +316,8 @@ def run(make_snapshots=True):
 
     if make_snapshots:
         try:
-            paths["monolayer_fast"] = _monolayer_snapshot(6.0, "oat_monolayer_fast.pdf")
-            paths["monolayer_slow"] = _monolayer_snapshot(12.0, "oat_monolayer_slow.pdf")
+            paths["monolayer_fast"] = _monolayer_snapshot(2.0, "oat_monolayer_fast.pdf")
+            paths["monolayer_slow"] = _monolayer_snapshot(4.0, "oat_monolayer_slow.pdf")
         except Exception as exc:  # snapshots are illustrative; never fail the run
             print(f"  [warning] monolayer snapshot skipped: {exc}")
 

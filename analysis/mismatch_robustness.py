@@ -23,7 +23,7 @@ the VERIFICATION step and by `--verify`).
 
 Identified parameters perturbed in the plant
 --------------------------------------------
-1. the morphological adaptation constant (nominal 7.4 h, applied to both
+1. the morphological adaptation constant (nominal 3 h, applied to both
    `tau_adapt` and `tau_orient`),
 2. gamma_min   (nominal from config),
 3. gamma_max   (nominal from config),
@@ -39,10 +39,11 @@ Perturbation sampling (epistemic), seeded and reproducible
 (a) one-at-a-time: each identified parameter is perturbed individually by a stated
     relative amount (default plus or minus 20 percent), the others held nominal, to
     give a tornado view. The morphological adaptation constant is additionally swept
-    over its calibrated range, 6 to 12 h.
+    from 2 to 8 h: 2 to 4 h is the range implied by the 6-8 h plateau at 1.4 Pa,
+    and 6 and 8 h stand for slower, denser monolayers.
 (b) joint: all four parameters are drawn simultaneously from a Latin hypercube over
-    their ranges (default plus or minus 20 percent, the adaptation constant over 6
-    to 12 h), with a configurable number of samples (default 64).
+    their ranges (default plus or minus 20 percent, the adaptation constant over 2
+    to 4 h), with a configurable number of samples (default 64).
 
 The epistemic perturbation draws are kept programmatically separate from the
 aleatory seeds used for the stochastic initial conditions. The Latin hypercube is
@@ -137,8 +138,8 @@ PARAM_LABELS = {
 # Map identified-parameter keys to RecedingHorizonMPC attribute names.
 PARAM_ATTR = {'gamma_min': 'gamma_min', 'gamma_max': 'gamma_max', 'tau_h': 'tau_h_sen'}
 REL_PERTURB = 0.20           # one-at-a-time and joint relative range (plus/minus)
-MORPH_RANGE = (6.0, 12.0)    # calibrated range of the adaptation constant, hours
-MORPH_SWEEP = [6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0]  # explicit OAT sweep
+MORPH_RANGE = (2.0, 4.0)     # range of the adaptation constant implied by the 6-8 h plateau, hours
+MORPH_SWEEP = [2.0, 2.5, 3.0, 3.5, 4.0, 6.0, 8.0]  # explicit OAT sweep; 6 and 8 h: slower, denser monolayers
 N_REP = 10                   # aleatory initial-condition seeds per plant
 N_LHS = 64                   # joint Latin hypercube samples
 NUM_STEPS = 6                # six-hour experimental window
@@ -405,7 +406,7 @@ def run_study(config, n_rep=N_REP, n_lhs=N_LHS, num_steps=NUM_STEPS,
         oat.append({'aggregate': agg, 'records': recs})
         emit('oat', i + 1, len(oat_targets))
 
-    # --- morphological adaptation constant explicit sweep 6..12 h -------------
+    # --- morphological adaptation constant explicit sweep 2..8 h --------------
     morph = []
     for i, val in enumerate(morph_sweep):
         params = dict.fromkeys(PARAM_KEYS, None); params['morph'] = val
@@ -588,7 +589,7 @@ def write_summary_markdown(result, path):
                  f"{c['J_mean']:.3f} | {c['constraint_violation_frequency']:.3f} | "
                  f"{o['constraint_violation_frequency']:.3f} |")
     L.append('')
-    L.append('## Adaptation-constant sweep, 6 to 12 h (closed loop)')
+    L.append('## Adaptation-constant sweep, 2 to 8 h (closed loop)')
     L.append('')
     L.append('| adaptation constant (h) | terminal phi_sen | J | violation freq. |')
     L.append('|---|---|---|---|')
@@ -742,7 +743,7 @@ def figure_joint_distributions(result, out_noext):
 
 def figure_morph_sweep(result, out_noext):
     """Terminal phi_sen and closed-loop cost as the plant adaptation constant is
-    swept over its calibrated range, with the nominal value marked."""
+    swept from 2 to 8 h, with the nominal value marked."""
     _style()
     meta = result['meta']
     xs = np.array([x['aggregate']['morph_value'] for x in result['morph']])
@@ -754,20 +755,22 @@ def figure_morph_sweep(result, out_noext):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9.2, 3.6))
     ax1.errorbar(xs, phi_m, yerr=phi_ci, marker='o', ms=4, capsize=3, color='C0')
     ax1.axhline(meta['phi_sen_max'], ls='--', color='r', lw=1.2, label='constraint 0.30')
-    ax1.axvline(meta['tau_adapt_hours'], ls=':', color='k', lw=1, label='nominal 7.4 h')
+    ax1.axvline(meta['tau_adapt_hours'], ls=':', color='k', lw=1,
+                label=f"nominal {meta['tau_adapt_hours']:g} h")
     ax1.set_ylim(0.0, 0.33)
     ax1.set_xlabel('plant adaptation constant (h)')
     ax1.set_ylabel(r'terminal $\phi_{\mathrm{sen}}$ (closed loop)')
     ax1.legend(loc='best'); ax1.set_title('(a) senescent fraction')
 
     ax2.errorbar(xs, J_m, yerr=J_ci, marker='o', ms=4, capsize=3, color='C0')
-    ax2.axvline(meta['tau_adapt_hours'], ls=':', color='k', lw=1, label='nominal 7.4 h')
+    ax2.axvline(meta['tau_adapt_hours'], ls=':', color='k', lw=1,
+                label=f"nominal {meta['tau_adapt_hours']:g} h")
     ax2.set_xlabel('plant adaptation constant (h)')
     ax2.set_ylabel('closed-loop cost $J$')
     ax2.legend(loc='best'); ax2.set_title('(b) closed-loop cost')
 
-    fig.suptitle('Closed-loop regulation across the calibrated 6 to 12 h range of '
-                 'the plant adaptation constant', fontsize=10)
+    fig.suptitle('Closed-loop regulation as the plant adaptation constant runs from '
+                 '2 to 8 h (2 to 4 h calibrated)', fontsize=10)
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     _savefig(fig, out_noext)
 
@@ -853,7 +856,7 @@ def main(argv=None):
     n_rep, n_lhs, num_steps = args.n_rep, args.n_lhs, args.num_steps
     morph_sweep = MORPH_SWEEP
     if args.smoke:
-        n_rep, n_lhs, morph_sweep = 2, 4, [6.0, 9.0, 12.0]
+        n_rep, n_lhs, morph_sweep = 2, 4, [2.0, 3.0, 4.0]
 
     print('=' * 72)
     print('Parametric plant-model mismatch robustness study')

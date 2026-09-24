@@ -114,26 +114,30 @@ class SimulationConfig:
         # === PAPER (Table 1, main.tex) GROUND-TRUTH PARAMETERS ===
         # Spatial / temporal morphological targets
         self.tau_act = 0.5            # Source: Table 1, main.tex — tau_act = 0.5 Pa
-        self.rho_star = 2.3           # Source: Table 1, main.tex — rho* = 2.3 (-)
-        self.theta_star = 0.0         # orientation target theta* = 0 deg (parallel / perfect alignment); 20 deg is now the t=6 h transient
+        self.rho_star = 2.3           # Source: Chala et al. 2021 — aspect ratio at the 1.4 Pa plateau (-)
+        self.theta_star = 20.0        # deg — healthy-cell orientation at the 1.4 Pa plateau (Chala et al. 2021, 16 h;
+        #                               ~21 deg by 8 h in Stefopoulos et al. 2022). Informational: the MPC reads
+        #                               THETA_FLOW_DEG in control/mpc_controller.py
         # ASPECT-RATIO adaptation time constant (hours). Set equal to
-        # tau_orient_hours (7.4 h): orientation and aspect ratio are driven by the
-        # same cytoskeletal remodelling, and only the orientation constant is
-        # calibrated against imaging (theta(6 h)=20 deg => 6/ln(45/20) ~ 7.4 h).
-        # There is no independent aspect-ratio timecourse to justify a distinct
-        # value, so a single, data-calibrated morphological constant is the
-        # parsimonious choice (was 9.0 h, the Table-1 6-12 h midpoint). NOTE: this
+        # tau_orient_hours (3 h): orientation and aspect ratio are driven by the
+        # same cytoskeletal remodelling, and the source reports them reaching the
+        # plateau together. At 1.4 Pa, control HUVEC monolayers in the ETH
+        # bioreactor reach the plateau (20 deg, aspect ratio 2.3) after about 6-8 h
+        # (Stefopoulos et al., Adv Sci 2022; Chala et al. 2021 measured the same
+        # values at 16 h). A plateau at 6-8 h is 86-95 % of the change, i.e.
+        # tau = 2-4 h; 3 h is the middle. Set from these plateau times, not fitted:
+        # no time course has been published. Was 7.4 h, which placed the 16 h
+        # value at 6 h on the way to 0 deg (docs/tau_adapt_plateau.md). NOTE: this
         # constant governs ASPECT RATIO only — cell AREA is fixed by the Voronoi
         # tessellation and is not relaxed with a temporal constant on the paper path.
-        self.tau_adapt_hours = 7.4    # hours — aspect-ratio adaptation; equals tau_orient_hours (one physical constant)
+        self.tau_adapt_hours = 3.0    # hours — aspect-ratio adaptation; equals tau_orient_hours (one physical constant)
         # Orientation adaptation time constant (hours): theta relaxes from
-        # theta_stat=45 deg toward theta*=0 deg, calibrated so theta(6 h)=20 deg
-        # matches the reference imaging (Chala/Nafsika):
-        #   20 = 45*exp(-6/tau)  ->  tau = 6/ln(45/20) ~ 7.4 h
-        # Kept as a SEPARATE field from tau_adapt_hours (both = 7.4 h, representing
-        # one physical constant) so the planned sensitivity study can still sweep
-        # orientation and aspect-ratio constants independently.
-        self.tau_orient_hours = 7.4   # hours — orientation adaptation time constant (see above)
+        # theta_stat = 45 deg toward its gated target (20 deg at 1.4 Pa), giving
+        # 23.4 deg at 6 h and 21.7 deg at 8 h. Kept as a SEPARATE field from
+        # tau_adapt_hours (both = 3 h, representing one physical constant) so a
+        # sensitivity study can still sweep orientation and aspect-ratio constants
+        # independently.
+        self.tau_orient_hours = 3.0   # hours — orientation adaptation time constant (see above)
         self.target_area_healthy_um2 = 2354.0   # Source: Table 1, main.tex — A_E* = 2354 um^2
         # === MODEL-STRUCTURE FLAGS (Task 5 refactor) ===
         # Select which arms of the senescence / population model are active.
@@ -215,7 +219,7 @@ class SimulationConfig:
         # update_cell_responses), which is NOT used by run_mpc_simulation / the
         # reported model. The reported dynamics use the gated static->flow targets
         # and the single fixed morphological adaptation constant defined above
-        # (tau_orient_hours = tau_adapt_hours = 7.4 h).
+        # (tau_orient_hours = tau_adapt_hours = 3 h).
         #
         # These five fields were previously assigned twice in __init__; the
         # values kept here are the ones that were already in effect (the second,

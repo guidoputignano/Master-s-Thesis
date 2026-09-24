@@ -104,6 +104,50 @@ def test_orientation_step_limits():
     assert abs(_wrap(got - th_star)) < 1e-9
 
 
+
+# ---------------------------------------------------------------------------
+# Gated targets and the plateau at 1.4 Pa (Chala et al. 2021; Stefopoulos et al. 2022)
+# ---------------------------------------------------------------------------
+def test_gated_targets_pass_through_the_measured_plateau():
+    """At 1.4 Pa the targets are the measured 20 deg and 2.3, whatever tau_act."""
+    import pytest
+    from endothelial_simulation.control.mpc_controller import (
+        _gated, RHO_STAT, RHO_FLOW, THETA_STAT_DEG, THETA_FLOW_DEG, TAU_FLOW_PA)
+    for tau_act in (0.3, 0.5, 0.7):
+        assert abs(_gated(THETA_STAT_DEG, THETA_FLOW_DEG, TAU_FLOW_PA, tau_act) - 20.0) < TOL
+        assert abs(_gated(RHO_STAT, RHO_FLOW, TAU_FLOW_PA, tau_act) - 2.3) < TOL
+        assert _gated(RHO_STAT, RHO_FLOW, tau_act, tau_act) == RHO_STAT   # closed gate
+    # above 1.4 Pa the target keeps rising along the same gate (2 Pa: 16.5 deg, 2.36)
+    assert abs(_gated(THETA_STAT_DEG, THETA_FLOW_DEG, 2.0, 0.5) - 16.54) < 0.01
+    assert abs(_gated(RHO_STAT, RHO_FLOW, 2.0, 0.5) - 2.355) < 0.001
+    with pytest.raises(ValueError):
+        _gated(RHO_STAT, RHO_FLOW, 1.0, TAU_FLOW_PA)
+
+
+def test_temporal_model_uses_the_reported_targets():
+    from endothelial_simulation.control.mpc_controller import _gated
+    tm = _model()
+    for tau in (0.0, 0.6, 1.0, 1.4, 2.0):
+        assert tm.gated_target(1.9, 2.3, tau) == _gated(1.9, 2.3, tau, 0.5)
+
+
+def test_plateau_reached_by_six_to_eight_hours_at_1p4_pa():
+    """One 3 h constant: healthy cells at ~21.7 deg by 8 h and 20 deg, 2.3 by 16 h."""
+    from endothelial_simulation.control.mpc_controller import RecedingHorizonMPC, flow_alignment_angle
+    cfg = SimulationConfig()
+    assert cfg.tau_adapt_hours == cfg.tau_orient_hours == 3.0
+    mpc = RecedingHorizonMPC(cfg)
+    pop = np.zeros(cfg.max_divisions + 3)
+    pop[0] = 100.0
+    x = {'pop': pop, 'rho_h': mpc.rho_target(0.0), 'theta_h': mpc.theta_target(0.0)}
+    align = {}
+    for hour in range(1, 17):
+        x = mpc.predict_step(x, 1.4)
+        align[hour] = (np.degrees(flow_alignment_angle(x['theta_h'])), x['rho_h'])
+    assert abs(align[8][0] - 21.7) < 0.1          # Stefopoulos et al. 2022: ~21 deg at 8 h
+    assert (45.0 - align[8][0]) / 25.0 > 0.9      # >90 % of the change by 8 h
+    assert abs(align[16][0] - 20.0) < 0.2 and abs(align[16][1] - 2.3) < 0.005   # Chala et al. 2021, 16 h
+
 if __name__ == "__main__":
     import sys
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

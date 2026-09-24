@@ -608,20 +608,26 @@ from ..models.population_dynamics import population_reduced_rhs
 
 
 # ----- morphological targets (Table 1, main.tex) -----------------------------
-RHO_STAT = 1.9          # Source: imaging — rho_stat = 1.9 (static aspect ratio)
-RHO_FLOW = 2.3          # Source: Table 1, main.tex — rho_flow (rho*) = 2.3
-RHO_STAT_STD = 0.67     # Source: imaging — aspect ratio spread, static (1.9 +/- 0.67)
-RHO_FLOW_STD = 0.78     # Source: imaging — aspect ratio spread, flow (2.3 +/- 0.78)
+# The flow values are the plateau of control HUVEC monolayers at 1.4 Pa in the
+# ETH parallel-plate bioreactor: 2.3 +/- 0.78 and 20 +/- 14 deg after 16 h
+# (Chala et al., Nano Lett 2021), reached by 6-8 h (Stefopoulos et al., Adv Sci
+# 2022: ~21 deg at 8 h). They were measured at one shear, TAU_FLOW_PA, so the
+# gated targets are scaled to pass through them there (see _gated).
+TAU_FLOW_PA = 1.4       # Pa — shear at which the flow values were measured
+RHO_STAT = 1.9          # Source: Chala et al. 2021 — static aspect ratio 1.9 +/- 0.67
+RHO_FLOW = 2.3          # Source: Chala et al. 2021 — aspect ratio at the 1.4 Pa plateau; also
+                        # the reference the controller's cost tracks
+RHO_STAT_STD = 0.67     # Source: Chala et al. 2021 — aspect ratio spread, static (1.9 +/- 0.67)
+RHO_FLOW_STD = 0.78     # Source: Chala et al. 2021 — aspect ratio spread, flow (2.3 +/- 0.78)
 THETA_STAT_DEG = 45.0   # static orientation baseline AND initial condition: isotropic (no
-                        # preferred direction with no flow), ~45 deg mean acute angle; the
-                        # relaxation start point theta(0) for theta(t)=theta* +
-                        # (theta_stat-theta*) exp(-t/tau_orient)
-THETA_FLOW_DEG = 0.0    # orientation target theta* = 0 deg (PARALLEL / perfect flow
-                        # alignment). Re-calibrated: parallel is the optimal plateau and
-                        # 20 deg is the transient reached at t=6 h (was 20 deg, an
-                        # asymptote). See tau_orient (tau = 6/ln(45/20) ~ 7.4 h).
-THETA_STAT_STD_DEG = 25.0  # Source: imaging — orientation spread, static (49 +/- 25 deg)
-THETA_FLOW_STD_DEG = 14.0  # Source: imaging — orientation spread, flow (20 +/- 14 deg)
+                        # preferred direction with no flow), ~45 deg mean acute angle
+                        # (Chala et al. 2021 measured 49 +/- 25 deg)
+THETA_FLOW_DEG = 20.0   # healthy-cell orientation at the 1.4 Pa plateau (Chala et al. 2021:
+                        # 20 +/- 14 deg at 16 h; Stefopoulos et al. 2022: ~21 deg at 8 h).
+                        # A mean acute angle, so it stays above 0 deg even when the cells
+                        # scatter evenly about the flow axis
+THETA_STAT_STD_DEG = 25.0  # Source: Chala et al. 2021 — orientation spread, static (49 +/- 25 deg)
+THETA_FLOW_STD_DEG = 14.0  # Source: Chala et al. 2021 — orientation spread, flow (20 +/- 14 deg)
 RHO_SEN = 2.0           # senescent aspect ratio (no flow response)
 PHI_SEN_RANDOM = np.pi / 4.0  # mean acute alignment of randomly oriented senescent cells
 
@@ -644,8 +650,15 @@ def _s_activation(tau, tau_act):
 
 
 def _gated(y_stat, y_flow, tau, tau_act):
-    """Gated interpolation target y*(tau) = y_stat + (y_flow - y_stat) s(tau)."""
-    return y_stat + (y_flow - y_stat) * _s_activation(tau, tau_act)
+    """Gated target y*(tau) = y_stat + (y_flow - y_stat) s(tau) / s(TAU_FLOW_PA).
+
+    y_flow is the value measured at TAU_FLOW_PA, so y*(TAU_FLOW_PA) = y_flow for
+    any tau_act; above that shear the target keeps rising along the same gate.
+    """
+    s_ref = _s_activation(TAU_FLOW_PA, tau_act)
+    if s_ref <= 0.0:
+        raise ValueError(f'tau_act = {tau_act} Pa must lie below TAU_FLOW_PA = {TAU_FLOW_PA} Pa')
+    return y_stat + (y_flow - y_stat) * _s_activation(tau, tau_act) / s_ref
 
 
 class RecedingHorizonMPC:
@@ -689,13 +702,15 @@ class RecedingHorizonMPC:
 
         s(tau) = 0                                for tau <= tau_act
         s(tau) = 1 - exp(-(tau - tau_act)/tau_act) for tau >  tau_act
-        y*(tau) = y_stat + (y_flow - y_stat) * s(tau)
+        y*(tau) = y_stat + (y_flow - y_stat) * s(tau) / s(1.4 Pa)
 
-    with tau_act = config.tau_act (Table 1; 0.5 Pa). Applied to:
-      * aspect ratio:  rho_stat = 1.9  ->  rho_flow = 2.3  (rho_target)
-      * orientation:   theta_stat = 45 deg -> theta_flow = 0 deg (parallel /
-        perfect flow alignment) (theta_target)
-    Below tau_act the monolayer stays isotropic (s = 0, targets = static).
+    with tau_act = config.tau_act (Table 1; 0.5 Pa). The flow values were
+    measured at 1.4 Pa, so the target equals them there. Applied to:
+      * aspect ratio:  rho_stat = 1.9  ->  rho_flow = 2.3 at 1.4 Pa (rho_target)
+      * orientation:   theta_stat = 45 deg -> theta_flow = 20 deg at 1.4 Pa
+        (theta_target; healthy cells, the plateau of control monolayers)
+    Below tau_act the monolayer stays isotropic (s = 0, targets = static); at
+    2 Pa the targets are 16.5 deg and 2.36.
     Per-cell heterogeneity is added as target = mean + z * std(tau), z fixed per
     cell, with the experimental spread itself gated static -> flow.
 
@@ -704,21 +719,24 @@ class RecedingHorizonMPC:
     Between control instants the healthy morphology relaxes toward its target by
     the closed-form first-order step response (eq:stepsolution)
         y(t+dt) = y* - (y* - y0) * exp(-dt / tau),
-    with ONE data-calibrated, INPUT-INDEPENDENT constant tau = 7.4 h governing
-    BOTH morphological channels (there is no tau = f(A_max) scaling here — that is
-    the deprecated legacy model). Orientation and aspect ratio are driven by the
-    same cytoskeletal remodelling; only the orientation channel is calibrated
-    against imaging, and that single calibration fixes the shared constant:
-      * ORIENTATION (config.tau_orient_hours = 7.4 h): theta relaxes on the circle
-        using the shortest-arc wrap <psi> = ((psi + pi) mod 2pi) - pi. Calibrated
-        so theta(6 h) = 20 deg matches the reference imaging:
-        20 = 45*exp(-6/tau) => tau = 6/ln(45/20) ~ 7.4 h.
-      * ASPECT RATIO (config.tau_adapt_hours = 7.4 h): rho relaxes toward
-        rho_target(tau) with the SAME constant (previously 9.0 h; unified onto the
-        single calibrated value — there is no independent aspect-ratio timecourse
-        to justify a distinct value). The two config fields are kept separate,
-        both 7.4 h, only so a sensitivity study can perturb them independently;
-        physically they are one constant.
+    with ONE INPUT-INDEPENDENT constant tau = 3 h governing BOTH morphological
+    channels (there is no tau = f(A_max) scaling here — that is the deprecated
+    legacy model). At 1.4 Pa, control HUVEC monolayers reach their plateau
+    (20 deg, aspect ratio 2.3) after about 6-8 h (Stefopoulos et al., Adv Sci
+    2022, same bioreactor; ~21 deg at 8 h, 20 deg at 16 h in Chala et al. 2021).
+    A plateau at 6-8 h means 86-95 % of the change by then, i.e. tau = 2-4 h;
+    3 h is the middle. No fitted time course is published, so the value is set
+    from these plateau times, not fitted:
+      * ORIENTATION (config.tau_orient_hours = 3 h): theta relaxes on the circle
+        using the shortest-arc wrap <psi> = ((psi + pi) mod 2pi) - pi. From
+        45 deg at 1.4 Pa: 23.4 deg at 6 h, 21.7 deg at 8 h, 20.1 deg at 16 h.
+      * ASPECT RATIO (config.tau_adapt_hours = 3 h): rho relaxes toward
+        rho_target(tau) with the SAME constant (the same cytoskeletal remodelling;
+        the source reports shape and alignment reaching the plateau together).
+        The two config fields are kept separate, both 3 h, only so a sensitivity
+        study can perturb them independently; physically they are one constant.
+    (Until September 2026 the model used 7.4 h toward 0 deg, placing the 16 h
+    value at 6 h; see docs/tau_adapt_plateau.md.)
     Cell AREA is NOT relaxed with a temporal constant on the reported path: it is
     fixed by the Voronoi tessellation (spatial model). tau_adapt therefore governs
     the ASPECT RATIO only.
@@ -791,15 +809,14 @@ class RecedingHorizonMPC:
         self.model_growth_to_confluence = getattr(config, 'MODEL_GROWTH_TO_CONFLUENCE', False)
         self.include_supraphysiological_arm = getattr(config, 'INCLUDE_SUPRAPHYSIOLOGICAL_ARM', False)
         self.tau_act = config.tau_act
-        # ASPECT-RATIO (rho) relaxation constant only; 7.4 h, equal to tau_orient
+        # ASPECT-RATIO (rho) relaxation constant only; 3 h, equal to tau_orient
         # (one physical morphological constant). Cell AREA is fixed by the Voronoi
         # tessellation, NOT relaxed with this constant on the reported path.
-        self.tau_adapt = config.tau_adapt_hours   # h — aspect-ratio relaxation (= tau_orient = 7.4 h)
-        # Orientation time constant: theta relaxes from theta_stat=45 deg toward
-        # the parallel target theta*=0 deg, calibrated so theta(6 h)=20 deg matches the
-        # reference imaging:  20 = 45*exp(-6/tau)  ->  tau = 6/ln(45/20) ~ 7.4 h.
-        # tau_adapt is set equal to this single calibrated value.
-        self.tau_orient = getattr(config, 'tau_orient_hours', 7.4)
+        self.tau_adapt = config.tau_adapt_hours   # h — aspect-ratio relaxation (= tau_orient = 3 h)
+        # Orientation time constant: theta relaxes from theta_stat = 45 deg toward
+        # its gated target (20 deg at 1.4 Pa). 3 h puts the plateau at 6-8 h, as
+        # measured at 1.4 Pa (Stefopoulos et al. 2022). tau_adapt equals it.
+        self.tau_orient = getattr(config, 'tau_orient_hours', 3.0)
         self.theta_stat = np.radians(THETA_STAT_DEG)
         self.theta_flow = np.radians(THETA_FLOW_DEG)
 
@@ -837,11 +854,11 @@ class RecedingHorizonMPC:
           1. Population compartments (senescence): integrate ``population_reduced_rhs``
              (eq:reduced) over [0, dt] with solve_ivp/RK45.
           2. Aspect ratio rho_h: closed-form relaxation toward rho_target(tau)
-             with the FIXED tau_adapt (7.4 h = tau_orient).
+             with the FIXED tau_adapt (3 h = tau_orient).
           3. Orientation theta_h: closed-form relaxation on the circle
              (shortest-arc wrap) toward theta_target(tau) with the FIXED
-             tau_orient (7.4 h).
-        A single morphological constant (7.4 h) governs both channels; cell area
+             tau_orient (3 h).
+        A single morphological constant (3 h) governs both channels; cell area
         is set by the tessellation, not relaxed here. No input-dependent
         time-constant scaling is used (that is the deprecated legacy model).
         """
@@ -1121,7 +1138,8 @@ def _summary_plots(log, out_dir):
     ax1.tick_params(axis='y', labelcolor='C0')
     ax2 = ax1.twinx()
     # population-mean alignment (main.tex phi_bar over all cells) and the
-    # healthy-cell alignment diagnostic (converges to the 20 deg flow target)
+    # healthy-cell alignment diagnostic; the dotted line is the healthy-cell
+    # plateau measured at 1.4 Pa (20 deg)
     l2, = ax2.plot(t, varphi_deg, marker='s', ms=3, color='C3',
                    label=r'$\bar{\varphi}$ (all cells)')
     l3, = ax2.plot(t, halign_deg, marker='^', ms=3, color='C1', ls='--',

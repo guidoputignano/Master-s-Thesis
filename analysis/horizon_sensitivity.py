@@ -11,7 +11,7 @@ establish whether the closed-loop cost and the constraint satisfaction plateau a
 the horizon grows, which is the evidence that a given reported horizon is
 sufficient. It is an analysis layer only. It does not modify the model dynamics,
 the cost function, or any parameter default. In particular the single
-data-calibrated morphological adaptation constant of 7.4 hours
+morphological adaptation constant of 3 hours
 (tau_orient_hours = tau_adapt_hours) is held fixed throughout, and cell area
 remains determined by the spatial tessellation and is not relaxed here.
 
@@ -182,7 +182,7 @@ def run_closed_loop(config, n_prediction, n_control, n_steps, seed):
 
     The controller is instantiated with the requested horizons through its public
     constructor arguments; no model or controller code is modified. All other
-    parameters, including the 7.4 hour adaptation constant, take their config
+    parameters, including the 3 hour adaptation constant, take their config
     defaults.
     """
     mpc = RecedingHorizonMPC(config, n_prediction=n_prediction, n_control=n_control)

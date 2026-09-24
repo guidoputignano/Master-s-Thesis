@@ -37,7 +37,7 @@ def build_config():
 
 def main(n_control_steps=24):
     # ~24 h conditioning so the morphology converges to the flow-adapted plateau
-    # (single morphological adaptation constant tau_adapt = tau_orient = 7.4 h).
+    # (single morphological adaptation constant tau_adapt = tau_orient = 3 h).
     # Each step is a 1 h receding-horizon decision.
     config = build_config()
 
