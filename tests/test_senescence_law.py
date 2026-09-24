@@ -198,6 +198,31 @@ def test_move_bound_binds_and_is_deterministic():
     assert np.isclose(abs(u1[0] - 0.0), mpc.delta_tau_max, atol=1e-3)  # binds
 
 
+def test_inherited_senescence_is_held_and_checked_at_admission():
+    """Reported model: the senescent fraction does not change within a session,
+    the cap is an admission check, and without injury the controller goes to the
+    top of the band."""
+    cfg = SimulationConfig()
+    assert cfg.CONSTANT_SENESCENT_FRACTION and not cfg.INCLUDE_SUPRAPHYSIOLOGICAL_ARM
+    mpc = RecedingHorizonMPC(cfg)
+    assert mpc.delta_tau_max == mpc.tau_max - mpc.tau_min      # no hourly ramp limit
+    pop = generate_initial_population(cfg, seed=42)
+    x = {'pop': pop, 'rho_h': mpc.rho_target(0.0), 'theta_h': mpc.theta_target(0.0)}
+    phi0 = mpc.outputs(x)[0]
+    u_prev, taus = 0.0, []
+    for _ in range(3):
+        u, _res = mpc.solve(x, u_prev)
+        u_prev = float(np.clip(u[0], mpc.tau_min, mpc.tau_max))
+        x = mpc.predict_step(x, u_prev)
+        taus.append(u_prev)
+    assert np.array_equal(x['pop'], pop) and np.isclose(mpc.outputs(x)[0], phi0)
+    assert taus[0] > 1.5 and np.isclose(taus[-1], mpc.tau_max, atol=1e-3)
+    heavy = pop.copy()
+    heavy[mpc.N + 2] = 0.5 * pop.sum()                         # half the cells senescent
+    assert mpc.admitted(x) is (phi0 <= 0.30 + 1e-9)
+    assert not mpc.admitted({'pop': heavy, 'rho_h': 1.9, 'theta_h': 0.0})
+
+
 def test_controller_actuates_out_of_gate_dead_zone():
     """With w_phi removed the objective is flat below tau_act; the multi-start
     solve must still climb rather than stall at u_prev = 0."""

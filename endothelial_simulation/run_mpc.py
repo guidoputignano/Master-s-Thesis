@@ -4,8 +4,8 @@ Single entry point for the endothelial mechanoadaptation MPC study (main.tex).
 Pipeline:
   1. Initialise the simulator with the corrected confluent cell count and the
      Table-1 parameters (areas in physical um^2, gap-free Voronoi tessellation).
-  2. Set the initial senescent composition phi_sen(0) = 0.20 with a 70/30
-     stress/telomere split (handled inside Simulator.initialize()).
+  2. Set the initial senescent composition phi_sen(0) = 0.30 (the A1 design),
+     all stress-induced (handled inside Simulator.initialize()).
   3. Run the receding-horizon MPC (run_mpc_simulation) for 6 control steps.
   4. Save the 24 tessellation frames, the assembled animation, and the three
      summary figures under endothelial_simulation/figures/.
@@ -27,9 +27,9 @@ def build_config():
     config = SimulationConfig().set_full_simulation()
     config.enable_holes = False          # Source: spec — holes off for the MPC run
     config.create_animations = False     # MPC frames are rendered by run_mpc_simulation
-    # Initial senescent composition: telomere senescence removed (main.tex Sec 2.3),
-    # so the initial pool is entirely stress-induced.
-    config.initial_senescent_fraction = 0.20
+    # Initial senescent composition: the A1 design (70 % control, 30 % TNF-alpha),
+    # entirely stress-induced (telomere senescence removed, main.tex Sec 2.3).
+    config.initial_senescent_fraction = 0.30
     config.senescent_stress_fraction = 1.0
     config.senescent_telomere_fraction = 0.0
     return config

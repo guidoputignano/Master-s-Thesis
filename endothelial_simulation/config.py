@@ -38,9 +38,11 @@ class SimulationConfig:
             self.imaging_field_um * self.imaging_field_um / 2354.0
         )  # = 180 cells
 
-        # === INITIAL SENESCENCE COMPOSITION (passage 6 HUVEC, PDL 15) ===
-        # Source: NMR senescence literature (project knowledge) — phi_sen(0) = 0.20 at PDL 15
-        self.initial_senescent_fraction = 0.20   # phi_sen(0) = 20%
+        # === INITIAL SENESCENCE COMPOSITION ===
+        # The simulated experiment (A1) mixed 70 % control and 30 % TNF-alpha-senescent
+        # HUVEC. The images agree: 24-31 % of static cells have enlarged nuclei, and
+        # 72-78 % of those nuclei carry doubled DNA (IMAGING_VALIDATION.md). Was 0.20.
+        self.initial_senescent_fraction = 0.30   # phi_sen(0) = 30 %, the A1 design
         # Telomere-induced (replicative) senescence is REMOVED from the reported
         # reduced model (main.tex Sec 2.3): the initial senescent pool is entirely
         # stress-induced (S_str), and phi_sen = S_str / N_tot. Cell division is
@@ -154,17 +156,25 @@ class SimulationConfig:
         #          at rate r. NOTE: dropping g CHANGES simulation output relative
         #          to g-on (proliferation is no longer slowed by density); r is
         #          left at its Table-1 value (the folded constant defaults to 1).
-        self.INCLUDE_SUPRAPHYSIOLOGICAL_ARM = True
+        self.CONSTANT_SENESCENT_FRACTION = True
+        #   True (reported): within a conditioning session of hours the senescent
+        #          fraction is inherited and constant. No study shows new senescence
+        #          within 6-24 h under any shear: disturbed flow needs days in vitro and
+        #          weeks in vivo (Warboys et al. 2014), TNF-alpha 3-6 days
+        #          (Kandhaya-Pillai et al. 2017), and 1-2 Pa laminar shear protects
+        #          only over >= 36 h. A confluent monolayer under laminar shear does not
+        #          proliferate either (Akimoto et al. 2000; White et al. 2001). The
+        #          phi_sen <= 0.30 cap is then an admission check on the seeded batch.
+        #   False: the population ODE below evolves phi_sen during the session
+        #          (the thesis model; for multi-day studies).
+        self.INCLUDE_SUPRAPHYSIOLOGICAL_ARM = False
         #   True : add the high-shear damage term gamma_d*tau^m/(tau_d^m+tau^m)
         #          to the induction rate (see gamma_d/tau_d/m_hill below).
-        #   False: no supraphysiological damage arm.
-        # NOW ON (author decision): the protective-only monotone Hill makes the
-        # control problem trivial (higher shear improves morphology AND lowers
-        # senescence, so the optimiser just saturates the shear ceiling and the
-        # phi_sen<=0.30 constraint is never active). Re-introducing the VAD-relevant
-        # supraphysiological injury arm makes senescence rise again toward the
-        # ceiling, so the controller must trade morphology against the senescence
-        # limit and the constraint becomes active. See main.tex Sec 2.3 / 3.4.
+        #   False (reported): no damage arm. Nothing supports injury in 0-2 Pa:
+        #          7.5 Pa for 24 h is cytoprotective (White et al. 2011), cells stay
+        #          attached at 10 Pa for 24 h, and acute erosion needs about 38 Pa
+        #          (Fry 1968). The thesis switched it on so that the controller would
+        #          face a trade-off (docs/senescence_realism.md).
 
         # === SENESCENCE-INDUCTION RATE gamma(tau): monotone-decreasing Hill ===
         # Replaces the earlier symmetric quadratic (eq:gamma_quad). Low shear
@@ -191,7 +201,7 @@ class SimulationConfig:
         #                                 can sweep them independently (cf. tau_adapt/tau_orient).
         self.n_hill = 2            # -    [fixed]    protective Hill exponent (shape constant,
         #                                 plausible 2-4); fixed at 2, NOT fitted.
-        # Supraphysiological (high-shear) damage arm (ON, see INCLUDE_ flag above):
+        # Supraphysiological (high-shear) damage arm (OFF, see INCLUDE_ flag above):
         # gamma(tau) += gamma_d * tau^m / (tau_d^m + tau^m). Rises with shear, so
         # senescence is minimised at moderate laminar shear and grows again toward
         # the VAD-relevant supraphysiological ceiling.
@@ -203,7 +213,10 @@ class SimulationConfig:
         #                                 [0,2] Pa VAD band). Sweepable; NOT fitted.
         self.m_hill = 2            # -    [fixed]    damage Hill exponent (plausible 2-4); fixed at 2.
 
-        self.phi_sen_max = 0.30    # -    Source: Table 1, main.tex — phi_sen^max = 30% of population
+        self.phi_sen_max = 0.30    # -    senescent-fraction limit. With CONSTANT_SENESCENT_FRACTION it is an
+        #                                 admission check on the seeded batch: at the 2 Pa plateau a 25 deg
+        #                                 population alignment needs phi_sen <= 0.30 (healthy 16.5 deg,
+        #                                 senescent 45 deg). Otherwise a hard constraint over the horizon.
 
         # === TELOMERE SENESCENCE PARAMETERS ===
         self.max_divisions = 16  # Source: Table 1, main.tex — N (Hayflick limit, HUVEC) = 16 (midpoint of [15,18] PD)

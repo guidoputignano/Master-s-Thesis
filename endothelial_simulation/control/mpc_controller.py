@@ -679,9 +679,13 @@ class RecedingHorizonMPC:
           + w_varphi * sum_k (varphi_bar(k) - 0.0)^2
           + w_u      * sum_k (tau(k) - tau(k-1))^2
     Hard constraints:
-        phi_sen(k) <= 0.30                     (senescent-fraction cap)
         0 <= tau(k) <= 2                       (magnitude bounds)
-        |tau(k) - tau(k-1)| <= delta_tau_max   (single move / slew bound)
+        |tau(k) - tau(k-1)| <= delta_tau_max   (move bound; by default the whole
+                                                band, see __init__)
+        phi_sen(k) <= 0.30                     (only when the senescent fraction
+                                                evolves, CONSTANT_SENESCENT_FRACTION
+                                                = False; otherwise it is an
+                                                admission check on phi_sen(0))
     Solved by constrained SLSQP; only the first move is applied (receding
     horizon).
 
@@ -741,9 +745,15 @@ class RecedingHorizonMPC:
     fixed by the Voronoi tessellation (spatial model). tau_adapt therefore governs
     the ASPECT RATIO only.
 
-    Senescence — reduced population ODEs (NOT a per-cell stress clock)
-    -----------------------------------------------------------------
-    The senescent fraction is governed by the reduced population ODE system
+    Senescence — inherited within a session (reported), or reduced ODEs
+    -------------------------------------------------------------------
+    With config.CONSTANT_SENESCENT_FRACTION (the reported model) the population
+    compartments do not change during a session: new senescence takes days, not
+    hours, and a confluent monolayer under laminar shear is quiescent (see
+    config.py for the sources). phi_sen is then the measured fraction of the
+    seeded batch, and phi_sen <= phi_sen_max is checked once, before conditioning
+    (``admitted``). Otherwise the senescent fraction is governed by the reduced
+    population ODE system
     ``population_reduced_rhs`` (eq:reduced), integrated over each control
     interval with scipy.integrate.solve_ivp (RK45). After the Task 5 refactor the
     induction rate is the monotone-decreasing Hill law and xi is removed:
@@ -770,7 +780,7 @@ class RecedingHorizonMPC:
 
     def __init__(self, config,
                  dt_h=1.0, n_prediction=6, n_control=3,
-                 tau_bounds=(0.0, 2.0), phi_sen_max=0.30, delta_tau_max=0.5,
+                 tau_bounds=(0.0, 2.0), phi_sen_max=0.30, delta_tau_max=None,
                  w_rho=1.0, w_varphi=5.0, w_u=0.1):
         self.config = config
         self.dt_h = dt_h
@@ -778,11 +788,12 @@ class RecedingHorizonMPC:
         self.Nc = n_control
         self.tau_min, self.tau_max = tau_bounds
         self.phi_sen_max = phi_sen_max
-        # Single hard move / slew bound |tau(k)-tau(k-1)| <= delta_tau_max (Pa per
-        # control interval). This is a CONTROL-design parameter (not a Table-1
-        # biological value); the default throttles the transient approach to
-        # saturation. Widen it (e.g. to tau_max) to recover the unconstrained move.
-        self.delta_tau_max = delta_tau_max
+        # Hard move bound |tau(k)-tau(k-1)| <= delta_tau_max (Pa per control
+        # interval), a control-design parameter. A sudden onset of flow triggers
+        # proliferative and inflammatory signalling, but a 30 s ramp avoids it
+        # (White et al. 2001; Bao et al. 1999), far below the 1 h control step,
+        # so by default the bound spans the whole band. The thesis used 0.5 Pa/h.
+        self.delta_tau_max = (self.tau_max - self.tau_min) if delta_tau_max is None else delta_tau_max
         # No w_phi: senescence is a hard constraint, not a soft penalty (Part A).
         self.w_rho, self.w_varphi, self.w_u = w_rho, w_varphi, w_u
 
@@ -808,6 +819,9 @@ class RecedingHorizonMPC:
         self.include_replicative_arm = getattr(config, 'INCLUDE_REPLICATIVE_ARM', True)
         self.model_growth_to_confluence = getattr(config, 'MODEL_GROWTH_TO_CONFLUENCE', False)
         self.include_supraphysiological_arm = getattr(config, 'INCLUDE_SUPRAPHYSIOLOGICAL_ARM', False)
+        # Inherited senescent fraction within a session (reported model): the
+        # population compartments are held, and phi_sen_max is an admission check.
+        self.constant_senescence = getattr(config, 'CONSTANT_SENESCENT_FRACTION', False)
         self.tau_act = config.tau_act
         # ASPECT-RATIO (rho) relaxation constant only; 3 h, equal to tau_orient
         # (one physical morphological constant). Cell AREA is fixed by the Voronoi
@@ -851,8 +865,9 @@ class RecedingHorizonMPC:
         Advance the reduced prediction state by one control interval at ``tau``.
 
         Three coupled updates, each per the reported model:
-          1. Population compartments (senescence): integrate ``population_reduced_rhs``
-             (eq:reduced) over [0, dt] with solve_ivp/RK45.
+          1. Population compartments (senescence): held when the senescent
+             fraction is inherited (CONSTANT_SENESCENT_FRACTION, reported), else
+             ``population_reduced_rhs`` (eq:reduced) integrated over [0, dt].
           2. Aspect ratio rho_h: closed-form relaxation toward rho_target(tau)
              with the FIXED tau_adapt (3 h = tau_orient).
           3. Orientation theta_h: closed-form relaxation on the circle
@@ -865,17 +880,13 @@ class RecedingHorizonMPC:
         dt = self.dt_h if dt is None else dt
         pop, rho_h, theta_h = state['pop'], state['rho_h'], state['theta_h']
 
-        # Population compartments: integrate eq:reduced with solve_ivp / RK45.
+        # Population compartments: held within a session (reported model), or
+        # integrated from eq:reduced with solve_ivp / RK45.
         gamma_d = self.gamma_d if self.include_supraphysiological_arm else 0.0
-        sol = solve_ivp(
-            lambda t, y: population_reduced_rhs(
-                y, tau, self.r, self.K,
-                self.gamma_min, self.gamma_max, self.tau_h_sen, self.n_hill, self.N,
-                include_replicative=self.include_replicative_arm,
-                model_growth=self.model_growth_to_confluence,
-                gamma_d=gamma_d, tau_d=self.tau_d, m=self.m_hill),
-            (0.0, dt), pop, method='RK45', rtol=1e-6, atol=1e-9)
-        pop_new = np.clip(sol.y[:, -1], 0.0, None)
+        if self.constant_senescence:
+            pop_new = np.array(pop, dtype=float, copy=True)
+        else:
+            pop_new = self._integrate_population(pop, tau, dt, gamma_d)
 
         # Single-cell observables: closed-form step response (eq:stepsolution).
         rho_t = self.rho_target(tau)
@@ -887,6 +898,18 @@ class RecedingHorizonMPC:
         theta_h_new = theta_h + diff * (1.0 - np.exp(-dt / self.tau_orient))
 
         return {'pop': pop_new, 'rho_h': rho_h_new, 'theta_h': theta_h_new}
+
+    def _integrate_population(self, pop, tau, dt, gamma_d):
+        """Integrate the reduced population ODE (eq:reduced) over [0, dt] at tau."""
+        sol = solve_ivp(
+            lambda t, y: population_reduced_rhs(
+                y, tau, self.r, self.K,
+                self.gamma_min, self.gamma_max, self.tau_h_sen, self.n_hill, self.N,
+                include_replicative=self.include_replicative_arm,
+                model_growth=self.model_growth_to_confluence,
+                gamma_d=gamma_d, tau_d=self.tau_d, m=self.m_hill),
+            (0.0, dt), pop, method='RK45', rtol=1e-6, atol=1e-9)
+        return np.clip(sol.y[:, -1], 0.0, None)
 
     def outputs(self, state):
         """Population-mean regulated outputs (phi_sen, rho_bar, varphi_bar)."""
@@ -902,6 +925,13 @@ class RecedingHorizonMPC:
         varphi_bar = (N_E * flow_alignment_angle(state['theta_h'])
                       + S * PHI_SEN_RANDOM) / N_tot
         return phi_sen, rho_bar, varphi_bar
+
+    def admitted(self, state):
+        """Admission check on the seeded batch: phi_sen(0) <= phi_sen_max, to within
+        half a cell (counts are integers: 54 of 179 cells is 30.2 %)."""
+        n_tot = float(np.sum(state['pop']))
+        tol = 0.5 / n_tot if n_tot > 0 else 0.0
+        return bool(self.outputs(state)[0] <= self.phi_sen_max + tol)
 
     # ---- cost and constraints ----------------------------------------------
     def _expand(self, u):
@@ -961,10 +991,9 @@ class RecedingHorizonMPC:
         randomness (the seed set is fixed).
         """
         bounds = [(self.tau_min, self.tau_max)] * self.Nc
-        constraints = [
-            {'type': 'ineq', 'fun': lambda u, x0=x0: self._phi_sen_margin(u, x0)},
-            {'type': 'ineq', 'fun': lambda u, up=u_prev: self._move_margin(u, up)},
-        ]
+        constraints = [{'type': 'ineq', 'fun': lambda u, up=u_prev: self._move_margin(u, up)}]
+        if not self.constant_senescence:        # held fraction: checked once, by admitted()
+            constraints.append({'type': 'ineq', 'fun': lambda u, x0=x0: self._phi_sen_margin(u, x0)})
         # Deterministic seeds: previous move, just inside the gate-open region,
         # mid-range, and both bounds. Sorted+deduplicated for stable ordering.
         u_prev_c = float(np.clip(u_prev, self.tau_min, self.tau_max))
@@ -982,8 +1011,9 @@ class RecedingHorizonMPC:
                            bounds=bounds, constraints=constraints,
                            options={'maxiter': 200, 'ftol': 1e-8})
             u = res.x if res.success else u0
-            feasible = (np.all(self._phi_sen_margin(u, x0) >= -1e-6)
-                        and np.all(self._move_margin(u, u_prev) >= -1e-6))
+            feasible = (np.all(self._move_margin(u, u_prev) >= -1e-6)
+                        and (self.constant_senescence
+                             or np.all(self._phi_sen_margin(u, x0) >= -1e-6)))
             # Rank feasible solutions by cost; infeasible ones are heavily
             # penalised so a feasible solution always wins when one exists.
             score = self.cost(u, x0, u_prev) + (0.0 if feasible else 1e6)
@@ -1358,6 +1388,9 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
     print(f"▶ MPC start: phi_sen={phi0:.3f}, rho_bar={rho0:.3f}, "
           f"varphi_bar={np.degrees(varphi0):.1f} deg, "
           f"healthy_align={np.degrees(flow_alignment_angle(x_state['theta_h'])):.1f} deg")
+    admitted = mpc.admitted(x_state)
+    if not admitted:
+        print(f"⚠️  phi_sen(0) = {phi0:.3f} exceeds the admission limit {mpc.phi_sen_max:.2f}")
 
     u_prev = tau0
 
@@ -1453,4 +1486,5 @@ def run_mpc_simulation(simulator, config, n_control_steps=6, output_dir=None,
 
     return {'log': log, 'ts': ts, 'frames': [f['path'] for f in frames],
             'animation': anim_path, 'dashboard': dash_path, 'output_dir': output_dir,
-            'seed': seed}   # master RNG seed used for this run (reproducibility)
+            'seed': seed,   # master RNG seed used for this run (reproducibility)
+            'admitted': admitted}

@@ -22,9 +22,10 @@ from endothelial_simulation.control.mpc_controller import run_mpc_simulation
 LOG_KEYS = ('tau', 'phi_sen', 'rho_bar', 'varphi_bar', 'healthy_align')
 
 
-def _make_config(seed):
+def _make_config(seed, constant_senescence=True):
     cfg = SimulationConfig().set_full_simulation()
     cfg.random_seed = seed
+    cfg.CONSTANT_SENESCENT_FRACTION = constant_senescence
     cfg.enable_holes = False
     cfg.create_animations = False
     cfg.initial_cell_count = 12      # small & fast; determinism is size-independent
@@ -34,8 +35,8 @@ def _make_config(seed):
     return cfg
 
 
-def _run_paper_path(seed, out_dir):
-    cfg = _make_config(seed)
+def _run_paper_path(seed, out_dir, constant_senescence=True):
+    cfg = _make_config(seed, constant_senescence)
     sim = Simulator(cfg)
     sim.set_constant_input(0.0)
     sim.initialize()
@@ -65,9 +66,12 @@ def test_same_seed_reproduces_logged_outputs(tmp_path):
 def test_different_seed_changes_outputs(tmp_path):
     """Sanity check that the seed actually drives the stochastic layout: a
     different seed should perturb at least one reported channel (otherwise the
-    'identical' test above would be vacuous)."""
-    res_a = _run_paper_path(42, tmp_path / "a")
-    res_b = _run_paper_path(1234, tmp_path / "b")
+    'identical' test above would be vacuous). With an inherited senescent fraction
+    the logged outputs depend on the seed only through the initial counts, so the
+    check runs with the evolving population, where the seed sets the division
+    stages."""
+    res_a = _run_paper_path(42, tmp_path / "a", constant_senescence=False)
+    res_b = _run_paper_path(1234, tmp_path / "b", constant_senescence=False)
     differs = any(
         not np.array_equal(np.asarray(res_a['log'][k], dtype=float),
                            np.asarray(res_b['log'][k], dtype=float))
