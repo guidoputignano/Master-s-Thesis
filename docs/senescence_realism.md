@@ -27,8 +27,9 @@ constraint is never active". The literature does not support either part:
 
 So within a session the senescent fraction is a property of the seeded cells. It
 depends on passage, donor and, in A1, the TNF-α pre-treatment. In A1 the design
-was 30 %, and the images agree: 24–31 % of static cells have enlarged nuclei, and
-72–78 % of those nuclei carry doubled DNA, as senescent HUVEC do.
+was 30 %, and the images agree: 30 % [25–35] of static cells have enlarged nuclei,
+and 72 % of those nuclei (77 % under flow) carry doubled DNA, as senescent HUVEC
+do.
 
 ## What changed
 
