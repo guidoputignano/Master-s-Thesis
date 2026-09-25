@@ -40,7 +40,7 @@ There are two variants:
 
 - **What the files record.** Every A1 `.nd2` file records 0.429 µm/px: Andor iXon 888 EMCCD
   (13 µm pixels, 1024 × 1024), Plan Apo 20x/0.75, and the Nikon Ti zoom changer at position
-  1.5 (× a 1.01 relay), so 13 / (20 × 1.515) µm. The 23 "40x" files record the same state,
+  1.5 (× a 1.01 relay), so 13 / (20 × 1.515) µm. The 24 "40x" files record the same state,
   although they were taken with a twice stronger objective. The recorded optics were stale.
 - **What the stage says.** Two overlapping fields (1.4 Pa 19dec21 seq013 and seq016) lie
   102.8 µm apart on the stage and 158 px apart in all three channels: 0.650 µm/px, the camera

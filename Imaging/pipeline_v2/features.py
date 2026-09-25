@@ -21,7 +21,7 @@ import seg_eval as se  # noqa: E402
 
 # Calibration. The .nd2 files record 0.429 um/px: the Nikon Ti zoom changer at position 1.5
 # (x a 1.01 relay = 1.515) with the 20x objective, 13 / (20 * 1.515) for the 13 um pixels of the
-# Andor iXon 888. Every A1 file records this same optics state, including the 23 files taken with
+# Andor iXon 888. Every A1 file records this same optics state, including the 24 files taken with
 # the 40x objective, so the recorded state was stale. The stage sets the scale: two overlapping
 # fields (1.4 Pa 19dec21 seq013 and seq016) lie 102.8 um apart on the stage and 158 px apart in all
 # three channels, 0.650 um/px (Imaging/Validation/stage_calibration.py), the camera pixel through
