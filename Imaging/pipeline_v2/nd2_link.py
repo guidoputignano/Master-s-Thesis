@@ -196,8 +196,10 @@ def calibration(m, k):
         key=d.key, nd2=d.nd2, recorded_objective=d.objective, recorded_zoom=d.zoom, recorded_px_um=rec,
         magnification=mag, px_um=mag.map(ft.PIXEL_UM),
         source=np.where(mag == '20x',
-                        'stage: 1.4Pa 19dec21 seq013/seq016, 102.8 um = 158 px (stage_calibration.py)',
-                        'half the 20x pixel: objective ratio, nuclei 3.8-4.0x larger in pixels'))).sort_values('key')
+                        'stage: 6 overlapping position pairs 103-668 um apart give 0.649-0.653 um/px, '
+                        'e.g. 1.4Pa 19dec21 seq013/seq016, 102.8 um = 158 px (stage_calibration.py)',
+                        'half the 20x pixel (objective ratio; nuclei 3.8-4.0x larger in pixels); '
+                        'stage: Static 19dec21 40x-003/004, 208.8 um = 637 px, 0.328 um/px'))).sort_values('key')
 
 
 def main(argv=None):

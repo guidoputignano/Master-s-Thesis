@@ -13,8 +13,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import stage_calibration as sc  # noqa: E402
 
 
+@pytest.mark.parametrize('method', ['masked', 'phase'])
 @pytest.mark.parametrize('px', [0.429, 0.650])
-def test_pixel_size_from_stage_and_shift(px):
+def test_pixel_size_from_stage_and_shift(px, method):
     rng = np.random.default_rng(0)
     canvas = ndi.gaussian_filter(rng.random((700, 700)), 2.0)
     canvas += np.linspace(0, 3, 700)[None, :] * canvas.std()      # illumination gradient, removed by the filter
@@ -22,6 +23,25 @@ def test_pixel_size_from_stage_and_shift(px):
     a = canvas[150:406, 150:406][None]
     b = canvas[150 + dy:406 + dy, 150 + dx:406 + dx][None]
     stage_a, stage_b = (1000.0, 2000.0), (1000.0 + dx * px, 2000.0 - dy * px)
-    r = sc.calibrate(stage_a, stage_b, a, b)[0]
+    r = sc.calibrate(stage_a, stage_b, a, b, method=method)[0]
     assert r['shift_px'] == pytest.approx(np.hypot(dy, dx), rel=0.01)
     assert r['um_per_px'] == pytest.approx(px, rel=0.01)
+
+
+@pytest.mark.parametrize('px', [0.429, 0.650])
+def test_thin_overlap_needs_the_masked_search(px):
+    """Two fields that share only a 36 px strip (14 % of the field), as most A1 pairs do. The shift is
+    beyond half the field, where phase correlation wraps around."""
+    rng = np.random.default_rng(1)
+    canvas = ndi.gaussian_filter(rng.random((700, 700)), 2.0)
+    dy, dx = 15, 220
+    a = canvas[100:356, 100:356][None]
+    b = canvas[100 + dy:356 + dy, 100 + dx:356 + dx][None]
+    stage_a, stage_b = (1000.0, 2000.0), (1000.0 + dx * px, 2000.0 - dy * px)
+    r = sc.calibrate(stage_a, stage_b, a, b)[0]
+    assert (r['shift_y_px'], r['shift_x_px']) == (dy, dx)
+    assert r['um_per_px'] == pytest.approx(px, rel=0.01)
+    assert abs(r['angle_deg']) < 1
+    assert r['error'] < 0.05                                          # the strip correlates almost perfectly
+    wrapped = sc.calibrate(stage_a, stage_b, a, b, method='phase')[0]
+    assert wrapped['um_per_px'] != pytest.approx(px, rel=0.05)

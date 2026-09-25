@@ -42,13 +42,16 @@ There are two variants:
   (13 µm pixels, 1024 × 1024), Plan Apo 20x/0.75, and the Nikon Ti zoom changer at position
   1.5 (× a 1.01 relay), so 13 / (20 × 1.515) µm. The 24 "40x" files record the same state,
   although they were taken with a twice stronger objective. The recorded optics were stale.
-- **What the stage says.** Two overlapping fields (1.4 Pa 19dec21 seq013 and seq016) lie
-  102.8 µm apart on the stage and 158 px apart in all three channels: 0.650 µm/px, the camera
-  pixel through the 20x objective alone (`../Validation/stage_calibration.py`).
+- **What the stage says.** Six pairs of overlapping field positions, 103–668 µm apart on the
+  stage, give 0.649–0.653 µm/px in all three channels, the camera pixel through the 20x objective
+  alone (`../Validation/stage_calibration.py`). For example, 1.4 Pa 19dec21 seq013 and seq016 lie
+  102.8 µm apart on the stage and 158 px apart in the images. Five pairs lie 537–668 µm apart,
+  farther than a field would be wide at 0.429 µm/px (439 µm), and still share a strip of cells.
 - **Cross-checks.** The same check returns the recorded pixel size of 2019 files of the same
   microscope and camera, taken at zoom position 1.0. Untreated HUVEC nuclei imaged there have the
   A1 nuclear size in pixels.
-- **40x.** Those nuclei are four times larger in pixels, so the pixel is 0.325 µm.
+- **40x.** Those nuclei are four times larger in pixels, so the pixel is 0.325 µm. The one
+  overlapping 40x pair gives 0.328 µm on the stage (1 % more, 2 % in area); 0.325 is kept.
 - **The imaged field is 666 × 666 µm.** The acquisitions are widefield z-stacks (spinning disk
   out of the light path; 13 × 0.7 µm at 20x, 21 × 0.4 µm at 40x).
 - **Constants.** They were set, and their outputs reviewed, at the recorded 0.429 µm. Each µm
