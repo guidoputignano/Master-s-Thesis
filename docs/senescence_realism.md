@@ -59,7 +59,7 @@ results in `results/senescence_realism/`):
 | Thesis law (injury, induction, φ0 0.20, 0.5 Pa/h) | 0.50, 1.00, 1.43, 1.27, 1.06, 0.88 | 0.270 | 2.115 | 28.9° | 33.2° |
 | **Reported (inherited 0.30)** | 1.78, 2.00, 2.00, 2.00, 2.00, 2.00 | 0.302 | 2.205 | 20.4° | 27.8° |
 | Reported, 0.5 Pa/h ramp limit | 0.50, 1.00, 1.50, 2.00, 2.00, 2.00 | 0.302 | 2.177 | 22.9° | 29.6° |
-| Reported, dense monolayer (τ = 6 h) | 1.72, 2.00, 2.00, 2.00, 2.00, 2.00 | 0.302 | 2.130 | 27.1° | 32.5° |
+| Reported, slow adaptation (τ = 6 h) | 1.72, 2.00, 2.00, 2.00, 2.00, 2.00 | 0.302 | 2.130 | 27.1° | 32.5° |
 | Reported, inherited 0.20 | 1.81, 2.00, 2.00, 2.00, 2.00, 2.00 | 0.201 | 2.234 | 20.4° | 25.4° |
 
 The first move stops short of 2 Pa because of the move penalty w_u.
@@ -73,8 +73,8 @@ The first move stops short of 2 Pa because of the move penalty w_u.
 - **Admission threshold.** At 2 Pa, a 22.5° target admits at most 21 % senescent
   cells, 25° at most 30 %, and 27.5° at most 39 %.
 - **Duration.** The time to 90 % / 95 % of the change is 6.9 / 9.0 h for τ = 3 h,
-  13.8 / 18 h for τ = 6 h and 18.4 / 24 h for τ = 8 h. Dense monolayers, such as A1,
-  need longer.
+  13.8 / 18 h for τ = 6 h and 18.4 / 24 h for τ = 8 h. Monolayers that adapt more
+  slowly need longer; A1 (normal density, 30 % senescent) had not aligned after 6 h.
 - **The 2 Pa target is extrapolated.** The plateau was measured at 1.4 Pa only; the
   2 Pa targets come from the shear gate s(τ) = 1 − exp(−(τ − τ_act)/τ_act), with
   τ_act = 0.5 Pa. For τ_act from 0.3 to 0.7 Pa the healthy-cell target at 2 Pa runs

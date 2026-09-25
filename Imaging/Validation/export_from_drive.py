@@ -106,7 +106,7 @@ def pixel_sizes(root):
                 try:
                     m = f.metadata.channels[0].microscope
                     row.update(objective=m.objectiveName, magnification=m.objectiveMagnification,
-                               na=m.objectiveNumericalAperture)
+                               na=m.objectiveNumericalAperture, zoom=m.zoomMagnification)
                 except Exception:
                     pass
             named = re.search(r'(\d+)x$', group)
@@ -115,6 +115,12 @@ def pixel_sizes(root):
                 # images are sampled twice as finely (nuclei four times larger in pixels).
                 row['note'] = (f"metadata objective {row['magnification']:g}x does not match the file name "
                                f"({named.group(1)}x): do not use this pixel size")
+                print(f"warning: {path}: {row['note']}", file=sys.stderr)
+            elif row.get('zoom') and float(row['zoom']) > 1.05:
+                # The A1 files record the zoom changer at 1.5 (x 1.01 relay); the stage shows it was
+                # not in the light path: 0.650 um/px at 20x (stage_calibration.py).
+                row['note'] = (f"metadata record a {float(row['zoom']):.3f}x zoom; for A1 it was not in the light "
+                               "path (stage_calibration.py): use 0.650 um/px at 20x, 0.325 at 40x")
                 print(f"warning: {path}: {row['note']}", file=sys.stderr)
             found[group] = row
         except Exception as e:

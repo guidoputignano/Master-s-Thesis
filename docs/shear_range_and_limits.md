@@ -122,7 +122,7 @@ extrapolation, and its spread is that of the unmeasured activation shear.
 **Conditioning time.** The adaptation constant does not depend on shear in the
 model, so the times are the same at 4 Pa as at 1.4 Pa: 90 and 95 % of the change
 take 6.9 and 9.0 h with T_adapt = 3 h, 4.6–9.2 and 6.0–12.0 h over 2–4 h, 13.8 and
-18.0 h for a dense monolayer (6 h), and up to 27.6 and 35.9 h with the slowest
+18.0 h for a monolayer that adapts twice as slowly (6 h), and up to 27.6 and 35.9 h with the slowest
 HUVEC kinetics reported (12 h). Under a 4 Pa step, a 30 % mixture is at 26.9° after
 6 h and 24.1° after 24 h (29.9° and 27.5° at 1.4 Pa).
 
@@ -166,9 +166,10 @@ For Nafsika:
 3. **Live imaging.** Can a chamber sit on a microscope stage under flow? Then one
    chamber gives the whole time course, and detachment directly, instead of three
    fixed slides.
-4. **Seeding density and days since confluence.** A1 held 1,420–1,660 cells/mm²,
-   2.4–3.7× Chala's; Stefopoulos et al. seeded 350–500 cells/mm² for three days.
-   Dense or long-confluent monolayers align slowly (38° after 16 h at 1.4 Pa in
+4. **Seeding density and days since confluence.** A1 held 620–720 cells/mm²,
+   1.1–1.6× Chala's (corrected: the A1 pixel is 0.650 µm, not the recorded 0.429 µm,
+   which had given 1,420–1,660). Stefopoulos et al. seeded 350–500 cells/mm² for three
+   days. Long-confluent monolayers align slowly (38° after 16 h at 1.4 Pa in
    Robotti et al. 2014). What density can be set, and can it be held the same across
    arms?
 5. **The pump.** Can it deliver 86 ml/min through one chamber for 24 h (4 Pa), and

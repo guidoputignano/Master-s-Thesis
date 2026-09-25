@@ -75,9 +75,10 @@ def condition_of(key):
 def parse_px_um(spec):
     """Pixel size lookup from '0.65' or '20x=0.65,40x=0.325'; None means pixels.
 
-    There is deliberately no default: the repository uses three different
-    x20 pixel sizes (0.325, 0.429 and 650/1024 um), so the value must come
-    from the OME metadata of the acquisitions.
+    There is deliberately no default: the repository has used three different
+    x20 pixel sizes (0.325, 0.429 and 650/1024 um), and the A1 metadata record a
+    stale zoom. For A1 use the stage calibration, '20x=0.65,40x=0.325'
+    (stage_calibration.py, Imaging/pipeline_v2/features.py).
     """
     if spec is None:
         return None

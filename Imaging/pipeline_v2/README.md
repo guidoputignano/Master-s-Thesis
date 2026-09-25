@@ -27,26 +27,37 @@ There are two variants:
 
 | Step | v1 (notebooks) | v2 (this folder) |
 |---|---|---|
-| Nuclei | Cellpose `cyto3` on the nuclear channel (d = 30 px), intensity/area filter | Cellpose `nuclei`, d = 11.2 µm (26 px at 20x, 52 px at 40x); nuclear top-hat at 20x, projection without top-hat at 40x (the top-hat hollows 40x nuclei) |
-| Whole cells | one watershed region per nuclear seed on the junction gradient; seeds merged by a corridor test with per-condition distances (2–25 px) | Cellpose `cyto3` on the junction channel + nuclei, d = 25.7 µm (60 px at 20x, 120 px at 40x) |
-| Holes / gaps | histogram-valley threshold, per-folder gating and manual overrides; watershed barrier only at 1.4 Pa | darker than all but 1 % of the field's cell interiors (junction channel without top-hat, σ = 1 µm), outside nucleated cells, opened with r = 0.86 µm (2 px at 20x, 4 px at 40x), >= 10 µm², at most 5 % nuclear pixels; v2.1 grows each gap over connected pixels that pass at the 5th percentile; uncovered area reported separately |
+| Nuclei | Cellpose `cyto3` on the nuclear channel (d = 30 px), intensity/area filter | Cellpose `nuclei`, d = 17.0 µm (26 px at 20x, 52 px at 40x); nuclear top-hat at 20x, projection without top-hat at 40x (the top-hat hollows 40x nuclei) |
+| Whole cells | one watershed region per nuclear seed on the junction gradient; seeds merged by a corridor test with per-condition distances (2–25 px) | Cellpose `cyto3` on the junction channel + nuclei, d = 38.9 µm (60 px at 20x, 120 px at 40x) |
+| Holes / gaps | histogram-valley threshold, per-folder gating and manual overrides; watershed barrier only at 1.4 Pa | darker than all but 1 % of the field's cell interiors (junction channel without top-hat, σ = 1.5 µm), outside nucleated cells, opened with r = 1.30 µm (2 px at 20x, 4 px at 40x), >= 23 µm², at most 5 % nuclear pixels; v2.1 grows each gap over connected pixels that pass at the 5th percentile; uncovered area reported separately |
 | Parameters | per condition, some per field | one setting for every condition, in micrometres |
-| Units | pixels (x40 areas divided by 4) | µm, 0.429 µm/px at 20x and 0.2145 µm/px at 40x |
+| Units | pixels (x40 areas divided by 4) | µm, 0.650 µm/px at 20x and 0.325 µm/px at 40x (stage calibration; `calibration.csv` per file) |
 | Border cells | kept in all statistics | flagged; excluded from morphology and senescence estimates |
 | Senescence | ordered gates ("Example value" thresholds, per condition) and k-means (k = 2) | shifted-population log-normal mixture of cell area per condition, with BIC and field-level bootstrap (below) |
 | Flow alignment | mean misalignment angle | also the nematic order parameter S = \|⟨exp(2iθ)⟩\| per field (0 = random, 1 = aligned) |
 
-**Calibration.** 0.429 µm/px is recorded in the `.nd2` metadata of the 20x
-files: Andor iXon 888 EMCCD (13 µm pixels, 1024 × 1024), Plan Apo 20x/0.75,
-1.515x zoom, so 13 / (20 × 1.515) µm. `Deconv.ipynb` uses the same value. The
-A1 "40x" files record the 20x objective and 0.429 µm too, but their nuclei are
-four times larger in pixels and a field holds a quarter as many cells, so
-they were taken with a twice stronger objective that the software did not
-register; the analysis uses 0.2145 µm/px, which the nuclear sizes confirm.
-The acquisitions are widefield z-stacks (spinning disk out of the light path;
-13 × 0.7 µm at 20x, 21 × 0.4 µm at 40x). A field of
-"650 × 650 µm at 20x" is the field without the 1.515x lens
-(13 µm × 1024 / 20 = 666 µm); the imaged field is 439 × 439 µm.
+**Calibration: 0.650 µm/px at 20x, 0.325 µm/px at 40x.**
+
+- **What the files record.** Every A1 `.nd2` file records 0.429 µm/px: Andor iXon 888 EMCCD
+  (13 µm pixels, 1024 × 1024), Plan Apo 20x/0.75, and the Nikon Ti zoom changer at position
+  1.5 (× a 1.01 relay), so 13 / (20 × 1.515) µm. The 23 "40x" files record the same state,
+  although they were taken with a twice stronger objective. The recorded optics were stale.
+- **What the stage says.** Two overlapping fields (1.4 Pa 19dec21 seq013 and seq016) lie
+  102.8 µm apart on the stage and 158 px apart in all three channels: 0.650 µm/px, the camera
+  pixel through the 20x objective alone (`../Validation/stage_calibration.py`).
+- **Cross-checks.** The same check returns the recorded pixel size of 2019 files of the same
+  microscope and camera, taken at zoom position 1.0. Untreated HUVEC nuclei imaged there have the
+  A1 nuclear size in pixels.
+- **40x.** Those nuclei are four times larger in pixels, so the pixel is 0.325 µm.
+- **The imaged field is 666 × 666 µm.** The acquisitions are widefield z-stacks (spinning disk
+  out of the light path; 13 × 0.7 µm at 20x, 21 × 0.4 µm at 40x).
+- **Constants.** They were set, and their outputs reviewed, at the recorded 0.429 µm. Each µm
+  constant is its original value × `features.SCALE` (1.515; areas × 2.296), so every pixel
+  operation and mask is unchanged (checked on three fields: identical nuclei, cells and gaps).
+- **Per file.** `calibration.csv` holds the per-file record (`nd2_link.py calibration`).
+- **Legacy notebooks.** `Deconv.ipynb` used 0.429 µm with the zoom, and
+  `Analysis/*/Cell_density.ipynb` used 0.325 µm at 20x, so their densities are four times too
+  high.
 
 **Gaps.** β-catenin marks junctions, so a gap and a cell interior look
 alike in the top-hat image. The difference is the diffuse cytoplasmic signal,
@@ -58,7 +69,7 @@ missed cells, not gaps.
 **Gap extent (v2.1, after the second review).** The reviewer saw gaps
 extending beyond their outline. A gap now starts from the 1st-percentile
 seeds, which are unchanged, and grows over connected pixels that pass the same
-test at the 5th percentile. Enclosed specks under 10 µm² without nuclear
+test at the 5th percentile. Enclosed specks under 23 µm² without nuclear
 signal are filled. `refine_v2.py --no-grow` keeps the seeds only, which are
 the masks the second review showed; they are also stored as value 8 in
 `_v2_gaps_sens.tif`.
@@ -67,7 +78,7 @@ the masks the second review showed; they are also stored as value 8 in
 segmentation.
 
 - *Junction clarity.* Bright ridges are measured at the junction scale on the
-  junction top-hat (Hessian, σ = 0.6 µm). The score is their 95th
+  junction top-hat (Hessian, σ = 0.91 µm). The score is their 95th
   percentile divided by the noise (MAD of the Laplacian residual). A field is
   low quality when its log score is more than 3 robust SDs below the median
   of its condition and magnification. Defocus and haze lower the score.
@@ -105,7 +116,7 @@ Chala et al. (2021, Nano Lett. 21:4911) report TNF-α-treated HUVECs 2.27×
 larger than controls on average (5335 vs 2354 µm²), with log-normal area
 distributions. The A1 slides mix 70 % control and 30 % TNF-α-treated cells.
 The absolute thresholds of that paper (e.g. > 5000 µm²) do not transfer,
-because these monolayers are denser, but the scale-free prediction does. The
+because cell areas depend on the segmentation, but the scale-free prediction does. The
 log cell area of interior cells should be a mixture of two components: the
 larger one should have a median about 2.3× the smaller one's and hold at most
 about 30 % of the cells.
@@ -210,7 +221,7 @@ agreement between the reported rule-based calls and the mixture.
   conditions are combined by gap area.
 
 `build_verdicts2.py` builds round 2 (v1 vs v2.1) on objects never shown
-before, with anything within 10 µm of a round-1 object excluded:
+before, with anything within 15 µm of a round-1 object excluded:
 
 - cells, stratified as above;
 - multinucleated cells;
@@ -221,7 +232,7 @@ Each crop has three views: junctions, "haze" (the junction channel without top-h
 where cytoplasm is grey and bare substrate black) and Golgi.
 
 `build_verdicts3.py` builds round 3 on the clear fields, per shear stress, for the
-two masks no earlier round showed, with anything within 10 µm of a round-1 or
+two masks no earlier round showed, with anything within 15 µm of a round-1 or
 round-2 object excluded:
 
 - the grown v2.1 gaps, drawn in proportion to their area: is all of the outlined

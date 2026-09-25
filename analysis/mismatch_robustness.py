@@ -40,7 +40,7 @@ Perturbation sampling (epistemic), seeded and reproducible
     relative amount (default plus or minus 20 percent), the others held nominal, to
     give a tornado view. The morphological adaptation constant is additionally swept
     from 2 to 8 h: 2 to 4 h is the range implied by the 6-8 h plateau at 1.4 Pa,
-    and 6 and 8 h stand for slower, denser monolayers.
+    and 6 and 8 h stand for monolayers that adapt more slowly.
 (b) joint: all four parameters are drawn simultaneously from a Latin hypercube over
     their ranges (default plus or minus 20 percent, the adaptation constant over 2
     to 4 h), with a configurable number of samples (default 64).
@@ -139,7 +139,7 @@ PARAM_LABELS = {
 PARAM_ATTR = {'gamma_min': 'gamma_min', 'gamma_max': 'gamma_max', 'tau_h': 'tau_h_sen'}
 REL_PERTURB = 0.20           # one-at-a-time and joint relative range (plus/minus)
 MORPH_RANGE = (2.0, 4.0)     # range of the adaptation constant implied by the 6-8 h plateau, hours
-MORPH_SWEEP = [2.0, 2.5, 3.0, 3.5, 4.0, 6.0, 8.0]  # explicit OAT sweep; 6 and 8 h: slower, denser monolayers
+MORPH_SWEEP = [2.0, 2.5, 3.0, 3.5, 4.0, 6.0, 8.0]  # explicit OAT sweep; 6 and 8 h: slower monolayers
 N_REP = 10                   # aleatory initial-condition seeds per plant
 N_LHS = 64                   # joint Latin hypercube samples
 NUM_STEPS = 6                # six-hour experimental window

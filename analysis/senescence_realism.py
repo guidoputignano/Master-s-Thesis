@@ -12,7 +12,7 @@ This script compares the two in the six-hour closed loop (master seed), and deri
 the design quantities the inherited fraction implies: the plateau alignment of the
 population against the senescent share (with the measured mixtures of Stefopoulos
 et al. 2022), the largest senescent share compatible with an alignment target, and
-the conditioning time as the adaptation constant grows (dense monolayers).
+the conditioning time as the adaptation constant grows (monolayers that adapt more slowly).
 
     python -m analysis.senescence_realism           # writes results/senescence_realism/
 """
@@ -58,7 +58,7 @@ SCENARIOS = [
           initial_senescent_fraction=0.20), dict(delta_tau_max=0.5, **CAP_2PA)),
     ('Reported: inherited fraction 0.30', dict(), dict(CAP_2PA)),
     ('Reported, with a 0.5 Pa/h ramp limit', dict(), dict(delta_tau_max=0.5, **CAP_2PA)),
-    ('Reported, dense monolayer (tau 6 h)', dict(tau_adapt_hours=6.0, tau_orient_hours=6.0), dict(CAP_2PA)),
+    ('Reported, slow adaptation (tau 6 h)', dict(tau_adapt_hours=6.0, tau_orient_hours=6.0), dict(CAP_2PA)),
     ('Reported, inherited fraction 0.20', dict(initial_senescent_fraction=0.20), dict(CAP_2PA)),
 ]
 
@@ -151,7 +151,7 @@ def figure(path_noext):
     t = np.linspace(0, 16, 161)
     for (p, tau_h, c, lab, dy) in ((0.0, 3.0, blue, r'no senescent cells, $T_{\rm adapt}$ = 3 h', 0.0),
                                    (0.3, 3.0, orange, r'30 % senescent, $T_{\rm adapt}$ = 3 h', -1.3),
-                                   (0.3, 6.0, aqua, r'30 % senescent, $T_{\rm adapt}$ = 6 h (dense)', 1.3)):
+                                   (0.3, 6.0, aqua, r'30 % senescent, $T_{\rm adapt}$ = 6 h (slow)', 1.3)):
         y = population_alignment(t, top, p, tau_h)
         b.plot(t, y, color=c, lw=1.5, label=lab)
         b.text(16.3, y[-1] + dy, f'{y[-1]:.0f}°', color=ink, va='center', fontsize=8)

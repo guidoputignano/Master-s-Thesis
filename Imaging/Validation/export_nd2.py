@@ -11,9 +11,10 @@ original .nd2 files in 'Renamed Data' and writes, per field:
   * the sum of the DAPI planes, for DNA content (integrated DAPI per nucleus);
   * optionally (--stacks) the full z-stack.
 
-The A1 experiment only; flow3 (series U) is not used, its conditions being unknown. The
-"40x" files record the 20x objective and its 0.429 um pixel, although they are sampled
-twice as finely: their corrected pixel is 0.2145 um (Imaging/pipeline_v2/features.py).
+The A1 experiment only (Xi Wu's series U is analysed separately). Every A1 file records the
+same stale optics state, the 20x objective with the zoom changer at 1.5 (0.429 um/px), also the
+"40x" files. The pixel size written is the stage calibration, 0.650 um at 20x and 0.325 um at
+40x (stage_calibration.py, Imaging/pipeline_v2/features.py); the recorded values are kept.
 
 Run it in Colab with Drive mounted:
 
@@ -48,10 +49,10 @@ from export_from_drive import ROOT, SplitZip  # noqa: E402
 
 # The A1 experiment only (see export_from_drive.CONDITIONS); keys look like 1.4Pa_A1_20dec21_40x_...
 CONDITIONS = ['0Pa_A1_20x', '0Pa_A1_40x', '1.4Pa_A1_20x', '1.4Pa_A1_40x']
-CORRECT_PX_UM = {'20x': 0.429, '40x': 0.2145}   # as Imaging/pipeline_v2/features.PIXEL_UM
+CORRECT_PX_UM = {'20x': 0.650, '40x': 0.325}   # as Imaging/pipeline_v2/features.PIXEL_UM (stage calibration)
 DAPI_RE = re.compile(r'dapi|hoechst|405|395|nuc', re.I)   # 395: the Nikon 'WF 395' / '395 Confocal' channels
 META_FIELDS = ['key', 'condition', 'file', 'objective', 'recorded_magnification', 'na',
-               'recorded_px_um', 'px_um', 'px_note', 'z_step_um', 'n_z', 'n_c', 'height', 'width',
+               'recorded_zoom', 'recorded_px_um', 'px_um', 'px_note', 'z_step_um', 'n_z', 'n_c', 'height', 'width',
                'dtype', 'channels', 'exposure_ms', 'stage_x_um', 'stage_y_um', 'stage_z_um',
                'z_first_um', 'z_last_um', 'acquired', 'dapi_channel', 'error']
 
@@ -115,7 +116,8 @@ def read_metadata(f, path, key, cond, root):
     dapi = next((i for i, n in enumerate(names) if DAPI_RE.search(str(n))), None)
     return dict(key=key, condition=cond, file=os.path.relpath(path, root),
                 objective=_get(lambda: mic.objectiveName), recorded_magnification=rec_mag,
-                na=_get(lambda: float(mic.objectiveNumericalAperture)), recorded_px_um=rec_px, px_um=px,
+                na=_get(lambda: float(mic.objectiveNumericalAperture)),
+                recorded_zoom=_get(lambda: float(mic.zoomMagnification)), recorded_px_um=rec_px, px_um=px,
                 px_note=note, z_step_um=_get(lambda: float(vs.z)), n_z=n_z, n_c=sizes.get('C', 1),
                 height=sizes.get('Y'), width=sizes.get('X'), dtype=str(_get(lambda: f.dtype, '')),
                 channels='|'.join(map(str, names)), exposure_ms=exposure,

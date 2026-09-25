@@ -6,7 +6,7 @@ Adds to the per-cell tables of ``analyze.py`` (cells_v1.csv, cells_v2.csv):
 * Cellpose nuclei per cell (a nucleus belongs to the cell covering more than half of it):
   count, total and largest area, background-subtracted DAPI of the projection (field
   normalised), shape of the largest nucleus. v1's own nuclear masks are inflated at
-  0.43 um/px, so every nuclear feature uses the Cellpose nuclei, for both segmentations.
+  0.65 um/px, so every nuclear feature uses the Cellpose nuclei, for both segmentations.
 * Golgi: area, fragments and intensity above a per-field Otsu threshold on the log Golgi
   top-hat, and the nucleus-to-Golgi vector.
 * Junction channel (beta-catenin, folder "Cadherins"): mean at the cell boundary and in the
@@ -40,8 +40,8 @@ import analyze as an  # noqa: E402
 import features as ft  # noqa: E402
 import segment_v2 as sg  # noqa: E402
 
-CORE_UM = 2.0           # cell interior = farther than this from any cell boundary
-MIN_FRAGMENT_UM2 = 1.0  # smallest Golgi fragment counted
+CORE_UM = 2.0 * ft.SCALE          # 3.0 um: cell interior = farther than this from any cell boundary
+MIN_FRAGMENT_UM2 = 1.0 * ft.AREA  # 2.3 um2: smallest Golgi fragment counted
 
 
 def per_label_sum(lab, img, n):

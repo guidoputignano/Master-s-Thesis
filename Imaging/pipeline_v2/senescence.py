@@ -3,7 +3,8 @@
 Chala et al. (Nano Lett. 21:4911) report TNF-alpha-treated HUVECs 2.3x larger than
 controls on average (2354 vs 5335 um^2), with log-normal area distributions. The A1
 slides mix 70 % control and 30 % TNF-alpha-treated cells. Absolute thresholds from
-that paper (e.g. > 5000 um^2) do not transfer: these monolayers are ~2.7x denser.
+that paper (e.g. > 5000 um^2) do not transfer: these monolayers are ~1.2x denser, and cell
+areas depend on the segmentation.
 The scale-free prediction does transfer. For interior cells, log(area) should be a
 two-component mixture:
 

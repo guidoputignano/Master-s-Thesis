@@ -2,8 +2,8 @@
 """Every imaging result of IMAGING_VALIDATION, per shear stress (static, 1.4 Pa).
 
 The clear fields of each condition are pooled. Each field is measured in um at its own pixel
-size (0.429 um, or 0.2145 um for the files whose metadata record the wrong objective), so
-pooling needs no rescaling. ``--group folder`` keeps the four image folders apart instead;
+size (0.650 um at 20x, 0.325 um at 40x: the stage calibration, features.py), so pooling needs
+no rescaling. ``--group folder`` keeps the four image folders apart instead;
 it reproduces the per-folder tables of the fifth version of the report, as a check.
 
 Reads the tables written by the other scripts (per cell: keep them private):
@@ -36,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'Validation'))
 sys.path.insert(0, HERE)
 import analyze as an  # noqa: E402
+import features as ft  # noqa: E402
 import nuclear_mixture as nm  # noqa: E402
 import polarity as po  # noqa: E402
 import senescence as sn  # noqa: E402
@@ -197,7 +198,8 @@ def area_mixture(G, cells, n_boot, root, quality):
 # ------------------------------------------------------------------ nuclear size (section 6)
 def nuclear_cells(features):
     d = features
-    return d[~d.touches_border.astype(bool) & (d.cp_n_nuclei >= 1) & (d.area_um2 > 50) & (d.cp_nuc_largest_um2 >= 25)]
+    return d[~d.touches_border.astype(bool) & (d.cp_n_nuclei >= 1) & (d.area_um2 > 50 * ft.AREA)
+             & (d.cp_nuc_largest_um2 >= 25 * ft.AREA)]          # 115 and 57 um2 (features.SCALE)
 
 
 def _nuc_task(a):
@@ -279,7 +281,7 @@ def alignment(G, features):
     out = []
     for seg in ('v2.1', 'v1'):
         d = G.label(features[seg][~features[seg].touches_border.astype(bool)])
-        ok = (d.cp_n_nuclei >= 1) & (d.area_um2 > 50) & (d.cp_nuc_largest_um2 >= 25)
+        ok = (d.cp_n_nuclei >= 1) & (d.area_um2 > 50 * ft.AREA) & (d.cp_nuc_largest_um2 >= 25 * ft.AREA)
         d['p_sen'] = np.nan
         for g in G.names:
             m = ok & (d.grp == g)
@@ -318,7 +320,7 @@ def alignment(G, features):
                         axes_rayleigh_p=float(np.exp(-len(ax) * R ** 2))))
     # density against order, per field (v1 cells; border cells count half)
     a = G.label(features['v1'])
-    um = np.where(a.condition.str.endswith('20x'), 0.429, 0.2145)
+    um = np.where(a.condition.str.endswith('20x'), ft.PIXEL_UM['20x'], ft.PIXEL_UM['40x'])
     a['fov'] = (1024 * um * 1e-3) ** 2
     dens = a.assign(w=np.where(a.touches_border.astype(bool), 0.5, 1.0)).groupby(['grp', 'key']).agg(
         w=('w', 'sum'), fov=('fov', 'first'))

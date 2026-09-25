@@ -5,7 +5,7 @@ Two checks. Neither uses a segmentation.
 
 * **Junction clarity.** The β-catenin top-hat projection (the image both segmentations
   use) is filtered for bright ridges at the junction scale: -lambda_min of the Hessian at
-  sigma = 0.6 um, scale-normalised by sigma^2. The field's score is the 95th percentile of
+  sigma = 0.91 um, scale-normalised by sigma^2. The field's score is the 95th percentile of
   that ridge strength divided by the image noise (robust MAD of the Laplacian residual,
   Immerkaer 1996). Defocus and haze lower it, because the junction line gets wider and
   fainter against the noise. A field is **low quality** when its log score lies more than
@@ -17,7 +17,7 @@ Two checks. Neither uses a segmentation.
   correlation >= 0.9 inside the overlap. One of the pair is kept (the higher score), so
   no cell is counted twice.
 
-The nuclear contrast (nucleus over a ring 1.5-3 um outside it, median over nuclei) is
+The nuclear contrast (nucleus over a ring 2.3-4.5 um outside it, median over nuclei) is
 reported as a diagnostic, not used by the rule: haze and defocus lower it too, while
 flow-induced junction changes do not.
 
@@ -49,7 +49,7 @@ import features as ft  # noqa: E402
 import analyze as an  # noqa: E402
 import segment_v2 as sg  # noqa: E402
 
-RIDGE_SIGMA_UM = 0.6     # junction half-width scale
+RIDGE_SIGMA_UM = 0.6 * ft.SCALE     # 0.91 um junction half-width scale (features.SCALE)
 RIDGE_PCT = 95.0         # junction pixels are a few % of a field
 Z_CUT = -3.0             # robust z below which a field is low quality
 DUP_OVERLAP = 0.5
@@ -77,9 +77,9 @@ def ridge_snr(cad, um, sigma_um=RIDGE_SIGMA_UM, pct=RIDGE_PCT):
 def nuclear_contrast(nuc, nuclei, um):
     """Median over nuclei of (inside - ring) / ring, ring 1.5-3 um outside the nucleus."""
     img = np.asarray(nuc, float)
-    inner = ndimage.binary_erosion(nuclei > 0, iterations=max(1, round(1.0 / um))) & (nuclei > 0)
+    inner = ndimage.binary_erosion(nuclei > 0, iterations=max(1, round(1.0 * ft.SCALE / um))) & (nuclei > 0)
     dist, (iy, ix) = ndimage.distance_transform_edt(nuclei == 0, return_indices=True)
-    ring = (dist * um > 1.5) & (dist * um <= 3.0)
+    ring = (dist * um > 1.5 * ft.SCALE) & (dist * um <= 3.0 * ft.SCALE)      # 2.3-4.5 um
     near = nuclei[iy, ix]
     i_in = pd.Series(img[inner]).groupby(nuclei[inner]).median()
     i_out = pd.Series(img[ring]).groupby(near[ring]).median()

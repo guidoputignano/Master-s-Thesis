@@ -58,7 +58,8 @@ from google.colab import drive; drive.mount('/content/drive')
 TIFFs lost. Per field it writes one metadata row (objective, recorded and corrected
 pixel size, z step, channels, exposure, stage X/Y/Z, acquisition time), the sharpest
 plane of each channel and the DAPI sum over z (DNA content), with `--stacks` also the
-full z-stack. The 40x files get their corrected 0.2145 µm pixel. In Colab:
+full z-stack. Pixel sizes are the stage calibration (0.650 µm at 20x, 0.325 µm at 40x), with the
+recorded values kept. In Colab:
 
 ```python
 !python Master-s-Thesis/Imaging/Validation/export_nd2.py --check    # list files and metadata only
@@ -90,7 +91,7 @@ python Imaging/Validation/diagnostics.py \
     --nuclei  Segmented/*/Nuclei --nuclei-glob '*_filtered_mask.tif' \
     --holes   Segmented/Static-x20/Holes Segmented/1.4Pa-x20/Holes_masks ... --holes-glob '*_segmented.tif' \
     --classes Analysis/*/Senescence_Results/cell_classification_rule_based_full.csv \
-    --px-um '20x=<from export report>,40x=<from export report>' --very-large-um2 <one physical gate> --out diag/
+    --px-um '20x=0.65,40x=0.325' --very-large-um2 <one physical gate> --out diag/
 ```
 
 Read `diag/diagnostics.md`. Red flags include cells overlapping holes, a
@@ -213,15 +214,20 @@ Ideally the auditor is a second person (e.g. the data owner). Judge a random
 
 ## Units
 
-Area thresholds and µm² values require the true pixel size. Read it from the
-original `.nd2` files (`export_from_drive.py` does this; the converted TIFFs
-have no calibration). The 20x files record 0.429 µm (Andor iXon 888, 13 µm
-pixels, Plan Apo 20x/0.75, 1.515x zoom). The A1 "40x" files record the 20x
-objective and the same 0.429 µm, although their images are sampled twice as
-finely; `export_from_drive.py` flags this, and the analysis uses 0.2145 µm. The repository currently uses
-0.325 µm (`Analysis/Cell_density.ipynb`), 0.429 µm (`Deconv.ipynb`) and
-650/1024 ≈ 0.635 µm (the paper's field of view) for the same x20
-objective. The scripts deliberately have no default.
+Area thresholds and µm² values require the true pixel size, and for A1 the `.nd2` headers do not
+give it.
+
+- **What the headers say.** Every A1 file records 0.429 µm: Andor iXon 888, 13 µm pixels,
+  Plan Apo 20x/0.75, and the Ti zoom changer at 1.5 (× 1.01). The "40x" files record the same
+  state, although their images are sampled twice as finely. The recorded optics were stale.
+- **The true pixel.** `stage_calibration.py` measures it from two overlapping fields (stage
+  displacement over image shift): 0.650 µm at 20x, 0.325 µm at 40x.
+  `Imaging/pipeline_v2/features.py` and `calibration.csv` use these values;
+  `export_from_drive.py` and `export_nd2.py` flag the recorded values.
+- **Older values.** Earlier code used 0.325 µm (`Analysis/Cell_density.ipynb`: densities four
+  times too high), 0.429 µm (`Deconv.ipynb`) and 650/1024 ≈ 0.635 µm (the paper's field of view,
+  2 % off).
+- **No default.** The scripts deliberately have none: pass `--px-um '20x=0.65,40x=0.325'` for A1.
 
 ## Files
 

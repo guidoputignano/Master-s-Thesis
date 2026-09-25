@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Do gaps sit next to enlarged-nucleus cells more than their size explains?
 
-For each interior v1 cell (at least one Cellpose nucleus, area > 50 um^2, largest nucleus
->= 25 um^2): does it lie within 1 um of a v2.1 (grown) gap? Enlarged-nucleus cells are
+For each interior v1 cell (at least one Cellpose nucleus, area > 115 um^2, largest nucleus
+>= 57 um^2): does it lie within 1.5 um of a v2.1 (grown) gap? Enlarged-nucleus cells are
 about three times larger, so they touch more gaps by geometry alone. The reference is the
 same gap mask moved to random positions in the same field (circular shifts): the shifted
 masks keep the gap shapes and the cell geometry and break any link to the nuclei. The
@@ -32,8 +32,8 @@ sys.path.insert(0, HERE)
 import analyze as an  # noqa: E402
 import features as ft  # noqa: E402
 
-ENLARGED_UM2 = 95.7     # static antimode of the largest Cellpose nucleus, pooled (by_shear.py)
-TOUCH_UM = 1.0
+ENLARGED_UM2 = 95.7 * ft.AREA     # 219.7 um2: static antimode of the largest Cellpose nucleus, pooled (by_shear.py)
+TOUCH_UM = 1.0 * ft.SCALE          # 1.5 um
 
 
 def contacts(cells, near, enlarged, normal):
@@ -91,7 +91,8 @@ def main(argv=None):
     os.makedirs(a.out, exist_ok=True)
     rng = np.random.default_rng(a.seed)
     d = pd.read_csv(a.features)
-    d = d[~d.touches_border.astype(bool) & (d.cp_n_nuclei >= 1) & (d.area_um2 > 50) & (d.cp_nuc_largest_um2 >= 25)].copy()
+    d = d[~d.touches_border.astype(bool) & (d.cp_n_nuclei >= 1) & (d.area_um2 > 50 * ft.AREA)
+          & (d.cp_nuc_largest_um2 >= 25 * ft.AREA)].copy()
     d['enlarged'] = d.cp_nuc_largest_um2 > a.threshold
     res = []
     for (cond, key), g in d.groupby(['folder', 'key']):

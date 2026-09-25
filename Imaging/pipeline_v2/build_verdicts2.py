@@ -4,7 +4,8 @@
 Round 1 (build_verdicts.py) showed that v1 and v2 cells are both mostly correct, and
 that v2's errors were cells cut short around the nucleus. This round tests v2.1 on
 objects never shown before. Every candidate (cell or gap) whose mask comes within
-10 um of any round-1 object's mask is excluded, and no object is shown twice.
+15 um (10 um at the recorded pixel size) of any round-1 object's mask is excluded, and no object is
+shown twice.
 
 * ``cell``: interior cells of v1 and v2.1, stratified by agreement (as in round 1);
 * ``multinucleated``: cells with at least two nuclei, per method. The methods disagree
@@ -46,7 +47,7 @@ from audit_gallery import normalise  # noqa: E402
 import verdict_session as vs  # noqa: E402
 
 N_CELL, N_MULTI, N_ENLARGED, N_GAP = 5, 4, 4, 3
-EXCLUDE_UM = 10.0
+EXCLUDE_UM = 10.0 * ft.SCALE     # 15 um (features.SCALE)
 Q_MULTI = bv.Q_CELL
 NOTE = ('Round 2. Press <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> to switch views: junctions, haze '
         '(cytoplasm grey, bare substrate black), Golgi (yellow). A gap is bare substrate: black in '
@@ -101,7 +102,7 @@ def round1_zone(root, round1, v2_masks, v2_gap_dir):
                 raise ValueError(f'{key} gap {r.label}: area differs from round 1 '
                                  '(pass the analysis folder whose gaps round 1 showed)')
             z |= obj
-        zones[key] = ndimage.distance_transform_edt(~z) * um <= EXCLUDE_UM      # a true 10 um disk
+        zones[key] = ndimage.distance_transform_edt(~z) * um <= EXCLUDE_UM      # a true 15 um disk
     return zones
 
 

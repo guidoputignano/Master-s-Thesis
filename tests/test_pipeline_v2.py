@@ -20,10 +20,29 @@ import verdict_session as vs  # noqa: E402
 
 KEY20 = '0Pa_A1_19dec21_20xA_L2RA_FlatA_seq001'
 KEY40 = '1.4Pa_A1_20dec21_40x_L2RA_FlatA_seq002'
+UM20 = ft.PIXEL_UM['20x']          # the stage calibration; the files record 0.429
 
 
 def test_pixel_size_by_magnification():
-    assert ft.pixel_um(KEY20) == 0.429 and ft.pixel_um(KEY40) == 0.2145
+    assert ft.pixel_um(KEY20) == 0.650 and ft.pixel_um(KEY40) == 0.325
+    assert ft.RECORDED_PIXEL_UM == {'20x': 0.429, '40x': 0.2145}
+    assert ft.SCALE == pytest.approx(0.650 / 0.429) and ft.AREA == pytest.approx(ft.SCALE ** 2)
+    cal = ft.calibration()
+    if len(cal):                                  # per-file record: every A1 field, recorded optics kept
+        assert set(cal.px_um.round(3)) <= {0.65, 0.325} and set(cal.recorded_zoom.round(3)) == {1.515}
+
+
+def test_um_constants_keep_every_pixel_operation():
+    """The constants were scaled with the calibration: in pixels they are what the reviews saw."""
+    import analyze as an
+    import segment_v2 as sg
+    for um_old, mag in ((0.429, '20x'), (0.2145, '40x')):
+        um = ft.PIXEL_UM[mag]
+        assert round(sg.CELL_DIAMETER_UM / um) == round(25.7 / um_old)
+        assert round(sg.NUC_DIAMETER_UM / um) == round(11.2 / um_old)
+        assert round(an.GAP_OPEN_UM / um) == round(0.858 / um_old)
+        assert an.GAP_MIN_UM2 / um ** 2 == pytest.approx(10.0 / um_old ** 2)
+        assert an.GAP_SMOOTH_UM / um == pytest.approx(1.0 / um_old)
 
 
 def test_cell_features_units_shape_nuclei_and_gaps():
@@ -38,11 +57,11 @@ def test_cell_features_units_shape_nuclei_and_gaps():
     holes = np.zeros(cells.shape, bool)
     holes[41:45, 30:40] = True                    # right under cell 2
     df = ft.cell_features(cells, KEY20, nuclei, holes).set_index('label')
-    assert df.loc[1, 'area_um2'] == pytest.approx(200 * 0.429 ** 2)
+    assert df.loc[1, 'area_um2'] == pytest.approx(200 * UM20 ** 2)
     assert df.loc[1, 'aspect_ratio'] == pytest.approx(2.0, rel=0.05)
     assert df.loc[1, 'misalign_deg'] == pytest.approx(0.0, abs=1e-6)      # along the x axis (flow)
     assert df.loc[1, 'n_nuclei'] == 2 and df.loc[2, 'n_nuclei'] == 0
-    assert df.loc[1, 'nuc_area_um2'] == pytest.approx(48 * 0.429 ** 2)
+    assert df.loc[1, 'nuc_area_um2'] == pytest.approx(48 * UM20 ** 2)
     assert bool(df.loc[3, 'touches_border']) and not bool(df.loc[1, 'touches_border'])
     assert bool(df.loc[2, 'hole_adjacent']) and not bool(df.loc[1, 'hole_adjacent'])
 
@@ -101,7 +120,7 @@ def test_gaps_from_cells_drops_lines_keeps_holes():
     cells[:, 40] = 0                              # 1 px unlabelled line between two cells
     cells[10:20, 10:20] = 0                       # 10 x 10 px = 18.4 um^2 at 20x: a gap
     cells[60:63, 10:13] = 0                       # 3 x 3 px = 1.7 um^2: below the minimum
-    gaps = an.gaps_from_cells(cells, 0.429)
+    gaps = an.gaps_from_cells(cells, UM20)
     assert gaps[10:20, 10:20].mean() > 0.8 and not gaps[:, 40].any() and not gaps[60:63, 10:13].any()
 
 
@@ -152,7 +171,7 @@ def test_dark_gaps_separates_gaps_from_missed_cells():
     nuclei[nuclei == 6] = 0
     cad[31:59, 31:59] = 10.0
     cells[cells == 11] = 0                            # a missed cell: cytoplasm level, nucleus inside
-    gaps, thr = an.dark_gaps(cells, nuclei, cad, 0.429)
+    gaps, thr = an.dark_gaps(cells, nuclei, cad, UM20)
     assert 10.0 < thr < 90.0
     assert gaps[35:55, 35:55].all()                   # the dark gap is found
     assert not gaps[61:89, 61:89].any()               # the missed cell is not a gap
@@ -197,7 +216,7 @@ def test_refine_v2_markers_growth_and_orphans():
     tophat[:, 45] = 100.0                                   # a junction between the left and right cells
     tophat[35, :45] = 100.0                                 # and one below cell 1
     raw = np.full(cells.shape, 100.0)
-    grown, gaps, sens, info = rf.refine(cells, nuclei, tophat, raw, nuclei * 50.0, 0.429)
+    grown, gaps, sens, info = rf.refine(cells, nuclei, tophat, raw, nuclei * 50.0, UM20)
     assert not gaps.any() and info['covered_out'] == 1.0
     c1 = grown[12, 12]
     assert (grown[5:30, 5:44] == c1).mean() > 0.95          # grew to the junctions
@@ -217,10 +236,10 @@ def test_nuclear_signal_catches_missed_dim_nucleus():
     cells[0:30, 0:30] = 1
     cad = np.full((60, 60), 100.0)
     cad[32:58, 32:58] = 5.0                                 # dark region around the missed nucleus
-    without, _ = an.dark_gaps(cells, detected, cad, 0.429)
-    with_img, _ = an.dark_gaps(cells, detected, cad, 0.429, nuc_img=nuc_img)
+    without, _ = an.dark_gaps(cells, detected, cad, UM20)
+    with_img, _ = an.dark_gaps(cells, detected, cad, UM20, nuc_img=nuc_img)
     assert without[45, 45] and not with_img[45, 45]
-    assert an.area_filter(without, 0.429, 1e6).sum() == 0
+    assert an.area_filter(without, UM20, 1e6).sum() == 0
 
 
 def test_round2_exclusion_uses_masks():
@@ -231,7 +250,7 @@ def test_round2_exclusion_uses_masks():
     lab[70:90, 70:90] = 3                                   # far away: kept
     zone = np.zeros(lab.shape, bool)
     zone[5:25, 5:25] = True                                 # a round-1 object
-    zones = {KEY20: np.asarray(__import__('scipy').ndimage.distance_transform_edt(~zone)) * 0.429 <= b2.EXCLUDE_UM}
+    zones = {KEY20: np.asarray(__import__('scipy').ndimage.distance_transform_edt(~zone)) * UM20 <= b2.EXCLUDE_UM}
     assert b2.excluded_labels(zones, KEY20, lab) == {1, 2}
     assert b2.excluded_labels(zones, 'other', lab) == set()
 
@@ -309,8 +328,8 @@ def _junction_field(rng, blur_px=0.0, shape=(200, 200), step=40):
 def test_quality_ridge_snr_drops_with_blur_and_z_flags_outlier():
     qm = pytest.importorskip('quality')
     rng = np.random.default_rng(3)
-    sharp = qm.ridge_snr(_junction_field(rng), 0.429)
-    blurred = qm.ridge_snr(_junction_field(rng, blur_px=4.0), 0.429)
+    sharp = qm.ridge_snr(_junction_field(rng), UM20)
+    blurred = qm.ridge_snr(_junction_field(rng, blur_px=4.0), UM20)
     assert blurred < 0.5 * sharp
     assert qm.noise_sigma(rng.normal(0, 10, (300, 300))) == pytest.approx(10, rel=0.05)
     z = qm.robust_z([10, 11, 9, 10.5, 9.5, 10.2, 3.0])
@@ -325,8 +344,8 @@ def test_quality_nuclear_contrast_drops_with_blur():
     for i, (cy, cx) in enumerate(((30, 30), (30, 90), (90, 30), (90, 90)), 1):
         nuclei[(yy - cy) ** 2 + (xx - cx) ** 2 <= 12 ** 2] = i
     img = np.where(nuclei > 0, 1000.0, 100.0)
-    sharp = qm.nuclear_contrast(img, nuclei, 0.429)
-    hazy = qm.nuclear_contrast(ndimage.gaussian_filter(img, 5.0), nuclei, 0.429)
+    sharp = qm.nuclear_contrast(img, nuclei, UM20)
+    hazy = qm.nuclear_contrast(ndimage.gaussian_filter(img, 5.0), nuclei, UM20)
     assert sharp == pytest.approx(9.0, rel=0.01) and hazy < 0.6 * sharp
 
 
@@ -369,10 +388,10 @@ def test_grow_gaps_extends_seeds_and_fills_specks():
     cand[29, 29] = False                          # a 1-px speck inside it
     cand[50:55, 50:55] = True                     # dark but never reaches the seed threshold
     nuclear = np.zeros_like(seeds)
-    g = an.grow_gaps(seeds, cand, nuclear, 0.429)
+    g = an.grow_gaps(seeds, cand, nuclear, UM20)
     assert g[18:40, 18:40].all() and not g[50:55, 50:55].any()
     nuclear[29, 29] = True                        # a speck with nuclear signal stays open
-    assert not an.grow_gaps(seeds, cand, nuclear, 0.429)[29, 29]
+    assert not an.grow_gaps(seeds, cand, nuclear, UM20)[29, 29]
 
 
 def test_render_keeps_full_crop_at_border():
@@ -380,7 +399,7 @@ def test_render_keeps_full_crop_at_border():
     rgb = np.random.default_rng(0).random((200, 200, 3))
     mask = np.zeros((200, 200), bool)
     mask[0:6, 90:100] = True                      # object on the top edge
-    im = np.asarray(bv.render(rgb, mask, 0.429, size=100))
+    im = np.asarray(bv.render(rgb, mask, UM20, size=100))
     left = im[:, :100]
     assert (left.reshape(-1, 3) != 24).any(axis=1).mean() > 0.95      # no padding band in the crop
 
@@ -394,7 +413,7 @@ def test_export_flags_objective_that_does_not_match_the_file_name(tmp_path, monk
             self.path = path
             self.sizes = {'Z': 13, 'C': 3, 'Y': 1024, 'X': 1024}
             mic = types.SimpleNamespace(objectiveName='Plan Apo 20x DIC M N2', objectiveMagnification=20.0,
-                                        objectiveNumericalAperture=0.75)
+                                        objectiveNumericalAperture=0.75, zoomMagnification=1.515)
             self.metadata = types.SimpleNamespace(channels=[types.SimpleNamespace(microscope=mic)])
 
         def __enter__(self):
@@ -412,7 +431,7 @@ def test_export_flags_objective_that_does_not_match_the_file_name(tmp_path, monk
     for name in ('1.4Pa_A1_20dec21_40x_L2RA_FlatA_seq006.nd2', '1.4Pa_A1_20dec21_20xA_L2RA_FlatA_seq015.nd2'):
         (d / name).write_bytes(b'')
     found, have = ex.pixel_sizes(str(tmp_path))
-    assert have and 'does not match' in found['A1_40x']['note'] and 'note' not in found['A1_20x']
+    assert have and 'does not match' in found['A1_40x']['note'] and 'zoom' in found['A1_20x']['note']
     assert 'does not match' in capsys.readouterr().err
 
 
@@ -477,8 +496,8 @@ def test_export_nd2_metadata_planes_and_dapi_sum(tmp_path, monkeypatch):
     assert [r['key'] for r in rows] == ['0Pa_A1_19dec21_20xA_L2RA_FlatA_seq001', '1.4Pa_A1_20dec21_40x_L2RA_FlatA_seq006']
     assert not (tmp_path / 'out').exists()                                    # --check writes nothing
     r20, r40 = rows
-    assert r20['px_um'] == 0.429 and r20['px_note'] == ''
-    assert r40['px_um'] == 0.2145 and 'records 20x' in r40['px_note']
+    assert r20['px_um'] == 0.650 and 'differs from the calibration' in r20['px_note']
+    assert r40['px_um'] == 0.325 and 'records 20x' in r40['px_note']
     assert r40['exposure_ms'] == 200.0 and r40['dapi_channel'] == 1 and r40['stage_x_um'] == 1000.0
     assert abs(r40['z_last_um'] - r40['z_first_um'] - 3.5) < 1e-9 and r40['acquired'] == '2021-12-20T09:36:00'
 
@@ -491,7 +510,7 @@ def test_export_nd2_metadata_planes_and_dapi_sum(tmp_path, monkeypatch):
         z.extract(member, tmp_path / 'x')
     with tifffile.TiffFile(tmp_path / 'x' / member) as tf:
         np.testing.assert_array_equal(tf.asarray(), stack[:, 1].astype(np.uint32).sum(0))
-        assert 'PhysicalSizeX="0.2145"' in tf.ome_metadata
+        assert 'PhysicalSizeX="0.325"' in tf.ome_metadata
     focus = pd.read_csv(tmp_path / 'out' / 'nd2_focus.csv')
     assert len(focus) == 2 * 3 * 6 and set(focus[focus.best == 1].z) == {3}
     assert any('nd2_stacks/0Pa_A1_20x/' in n for z in stacks for n in zipfile.ZipFile(z).namelist())
@@ -582,7 +601,7 @@ def test_gap_contact_null_detects_gaps_placed_next_to_enlarged_cells():
 def test_nd2_dna_index_puts_doubled_dna_at_4n():
     nl = pytest.importorskip('nd2_link')
     rng = np.random.default_rng(5)
-    area = np.r_[rng.normal(65, 5, 200), rng.normal(130, 10, 60)]
+    area = np.r_[rng.normal(65, 5, 200), rng.normal(130, 10, 60)] * ft.AREA     # true um2 (features.SCALE)
     dna = np.r_[rng.normal(1.0, 0.08, 200), rng.normal(2.0, 0.12, 60)] * 5e4
     d = pd.DataFrame(dict(key='k', label=np.arange(260), area_um2=area, dna_raw=dna))
     out = nl.dna_index(d)
@@ -637,7 +656,7 @@ def test_round3_scores_gap_area_by_multiplicity_and_outlines_touching_nuclei():
     nuc = np.zeros((80, 80), np.int32)
     nuc[30:50, 25:40] = 1
     nuc[30:50, 40:55] = 2
-    im = np.array(bv3.render_multi(rgb, cell, nuc, 0.429, size=160))
+    im = np.array(bv3.render_multi(rgb, cell, nuc, UM20, size=160))
     right = im[:, 168:]
     red = (right[..., 0] == 255) & (right[..., 1] == 40)
     ys, xs = np.nonzero(red)
@@ -647,7 +666,7 @@ def test_round3_scores_gap_area_by_multiplicity_and_outlines_touching_nuclei():
 
 def test_nucleus_rule_removes_gaps_around_a_nucleus_and_fills_small_voids():
     import analyze as an
-    um = 0.429
+    um = UM20
     gaps = np.zeros((120, 120), bool)
     nuclei = np.zeros((120, 120), np.int32)
     gaps[5:45, 5:45] = True

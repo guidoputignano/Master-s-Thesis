@@ -19,15 +19,40 @@ from skimage.measure import regionprops
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'Validation'))
 import seg_eval as se  # noqa: E402
 
-# Calibration: 0.429 um/px at 20x, recorded in the .nd2 metadata (Andor iXon 888, 13 um
-# pixels, Plan Apo 20x/0.75, 1.515x zoom: 13 / (20 * 1.515)) and used in Deconv.ipynb. The
-# paper's "650 x 650 um at 20x" is the field without the 1.515x lens (13 um * 1024 / 20).
-# 40x is half. The A1 "40x" .nd2 files wrongly record the 20x objective and 0.429 um/px;
-# their nuclei are four times larger in pixels, which confirms 0.2145 um/px.
-PIXEL_UM = {'20x': 0.429, '40x': 0.2145}
+# Calibration. The .nd2 files record 0.429 um/px: the Nikon Ti zoom changer at position 1.5
+# (x a 1.01 relay = 1.515) with the 20x objective, 13 / (20 * 1.515) for the 13 um pixels of the
+# Andor iXon 888. Every A1 file records this same optics state, including the 23 files taken with
+# the 40x objective, so the recorded state was stale. The stage sets the scale: two overlapping
+# fields (1.4 Pa 19dec21 seq013 and seq016) lie 102.8 um apart on the stage and 158 px apart in all
+# three channels, 0.650 um/px (Imaging/Validation/stage_calibration.py), the camera pixel through
+# the 20x objective alone; 2019 files of the same microscope and camera, recorded at zoom position
+# 1.0, pass the same check. The 40x files are half (their nuclei are four times larger in pixels).
+# calibration.csv holds the per-file record: recorded optics against the pixel size used.
+RECORDED_PIXEL_UM = {'20x': 0.429, '40x': 0.2145}     # used by the analysis until the stage check
+PIXEL_UM = {'20x': 0.650, '40x': 0.325}
+# The pipeline's lengths were chosen, and its outputs reviewed, at the recorded pixel size. Each
+# um constant is therefore its original value times SCALE (areas SCALE ** 2): every pixel
+# operation, mask and verdict stays as it was, and the constant is stated in true units.
+SCALE = PIXEL_UM['20x'] / RECORDED_PIXEL_UM['20x']     # 1.5152
+AREA = SCALE ** 2                                      # 2.2957
+
+_CALIBRATION = None
+
+
+def calibration():
+    """Per-file calibration table (calibration.csv): field key -> pixel size used, with provenance."""
+    global _CALIBRATION
+    if _CALIBRATION is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'calibration.csv')
+        _CALIBRATION = pd.read_csv(path).set_index('key') if os.path.exists(path) else pd.DataFrame()
+    return _CALIBRATION
 
 
 def pixel_um(key):
+    """True pixel size of a field: its row in calibration.csv, else its magnification."""
+    cal = calibration()
+    if len(cal) and key in cal.index:
+        return float(cal.loc[key, 'px_um'])
     return PIXEL_UM[se.condition_of(key).split('_')[-1]]
 
 

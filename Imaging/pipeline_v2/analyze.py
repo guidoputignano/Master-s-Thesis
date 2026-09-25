@@ -43,13 +43,15 @@ V1_HOLES = {'Static-x20': ('Holes', '*regional_segmented.tif'), 'Static-x40': ('
 # where 'Nuclei' is a copy of 'Nuclei_raw' and the seeds came from 'Nuclei_filtered'.
 V1_NUCLEI = {'Static-x20': 'Nuclei', 'Static-x40': 'Nuclei', '1.4Pa-x20': 'Nuclei', '1.4Pa-x40': 'Nuclei_filtered'}
 DUPLICATE = re.compile(r'\s?\(\d+\)')   # 'seq001 (1).tif', 'tophat(1).tif': copies of a field
-GAP_MIN_UM2 = 10.0      # smallest gap counted (fixed before any review; 25 and 50 um^2 reported as sensitivity)
-GAP_OPEN_UM = 0.858     # opening radius: exactly 2 px at 20x and 4 px at 40x (removes inter-cell lines)
+# um constants: the original value (set at the recorded 0.429 um/px) times ft.SCALE, areas ft.AREA, so that
+# every pixel operation is unchanged and the constant reads in true units (features.py).
+GAP_MIN_UM2 = 10.0 * ft.AREA      # 23 um2: smallest gap counted (fixed before any review; 57 and 115 um2 as sensitivity)
+GAP_OPEN_UM = 0.858 * ft.SCALE    # 1.30 um opening radius: exactly 2 px at 20x and 4 px at 40x (removes inter-cell lines)
 GAP_DARK_PCT = 1.0      # gap pixels are darker than all but this % of cell interiors (per field)
 GAP_GROW_PCT = 5.0      # v2.1: a gap extends over connected pixels darker than this percentile
-GAP_SMOOTH_UM = 1.0     # Gaussian smoothing of the β-catenin projection before the darkness test
-GAP_HOLE_FILL_UM2 = 50.0  # third review: nucleus-free voids inside a gap are filled up to this area
-CORE_UM = 2.0           # cell interior = farther than this from any cell boundary
+GAP_SMOOTH_UM = 1.0 * ft.SCALE    # 1.5 um Gaussian smoothing of the β-catenin projection before the darkness test
+GAP_HOLE_FILL_UM2 = 50.0 * ft.AREA   # 115 um2, third review: nucleus-free voids inside a gap are filled up to this area
+CORE_UM = 2.0 * ft.SCALE          # 3.0 um: cell interior = farther than this from any cell boundary
 
 
 def segment_inputs(root, cond):
@@ -160,7 +162,7 @@ def nucleus_rule(gaps, nuclei, nuclear, um, max_hole_um2=GAP_HOLE_FILL_UM2, min_
 
     A gap component whose enclosed holes hold at least ``min_frac`` of a nucleus surrounds
     that nucleus: it is a faint cell, not bare substrate (the review's largest static "gap",
-    3,100 um^2, was a dim senescent cell around its nucleus), so the component is removed.
+    7,100 um^2, was a dim senescent cell around its nucleus), so the component is removed.
     Enclosed holes without nuclear signal and smaller than ``max_hole_um2`` (a tenth of a
     normal cell) are filled: a void inside a gap is substrate the growth went around.
     ``nuclei``: nucleus labels; ``nuclear``: pixels with nuclear stain (as in grow_gaps)."""
@@ -284,8 +286,9 @@ def run(root, v2_root, out, conds, limit=None, exclude=()):
             else:
                 h2, thr = dark_gaps(c2, n2, img, um, nuc_img=nimg)
                 sens = {f'v2_gap_frac_p{p:g}': dark_gaps(c2, n2, img, um, p, nimg)[0].mean() for p in (0.5, 5.0)}
-            sens.update({f'v2_gap_frac_min{a:g}': area_filter(h2, um, a).mean() for a in (25.0, 50.0)})
-            sens.update({f'v1_gap_frac_min{a:g}': area_filter(h1, um, a).mean() for a in (10.0, 25.0, 50.0)})
+            # column names keep the original thresholds; true areas are 2.3 times larger (57, 115 um2; 23 um2)
+            sens.update({f'v2_gap_frac_min{a:g}': area_filter(h2, um, a * ft.AREA).mean() for a in (25.0, 50.0)})
+            sens.update({f'v1_gap_frac_min{a:g}': area_filter(h1, um, a * ft.AREA).mean() for a in (10.0, 25.0, 50.0)})
             tifffile.imwrite(f'{out}/v2_gaps/{cond}/{k}_v2_gaps.tif', h2.astype(np.uint8), compression='zlib')
             f1 = ft.cell_features(c1, k, n1, h1)
             f2 = ft.cell_features(c2, k, n2, h2)
@@ -384,8 +387,8 @@ def _summarise(task):
 
 
 def mixture_cells(cells):
-    """Cells entering the mixture: interior, at least one nucleus, above 50 um^2."""
-    return cells[~cells.touches_border & (cells.n_nuclei >= 1) & (cells.area_um2 > 50)]
+    """Cells entering the mixture: interior, at least one nucleus, above 115 um^2 (50 at the recorded pixel)."""
+    return cells[~cells.touches_border & (cells.n_nuclei >= 1) & (cells.area_um2 > 50 * ft.AREA)]
 
 
 def with_posterior(cells):

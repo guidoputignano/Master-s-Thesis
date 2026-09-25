@@ -25,8 +25,9 @@ class SimulationConfig:
         self.grid_size = (1024, 1024)  # pixels (display resolution)
 
         # === IMAGING FIELD / PIXEL SCALE (Table 1, main.tex) ===
-        # The bioreactor domain corresponds to a 650x650 um imaging field at 20x.
-        self.imaging_field_um = 650.0          # Source: Table 1, main.tex — imaging field = 650 um (20x)
+        # The bioreactor domain is a 650x650 um patch, a modelling choice close to one 20x field of the
+        # A1 images (666 um: 1024 px at 0.650 um, the stage calibration; the files record 0.429 um).
+        self.imaging_field_um = 650.0          # model domain (main.tex, in-silico study)
         self.computation_scale = 4             # comp pixels per display pixel (per axis); see Grid
         # micrometres per display pixel
         self.pixel_scale_um = self.imaging_field_um / self.grid_size[0]  # = 650/1024 um/px

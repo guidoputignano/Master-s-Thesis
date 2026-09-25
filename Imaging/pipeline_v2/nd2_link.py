@@ -11,17 +11,22 @@ The .nd2 files in the data repository (``Original/``) carry Nafsika Chala's file
 * ``map``: each field key to its file, by image content (the DAPI maximum projection
   against the projected nuclei of the field, both reduced to 256 x 256).
 * ``dna``: per Cellpose nucleus, the DAPI signal summed over the z-stack minus the local
-  background ring (1-3 um outside the nucleus), and a DNA index: that sum divided by the
+  background ring (1.5-4.5 um outside the nucleus), and a DNA index: that sum divided by the
   median of the field's normal-size nuclei (20th-60th area percentile, below the enlarged
   cut-off), so 1 is the field's typical 2N nucleus and 2 is doubled DNA (4N).
+* ``calibration``: the per-file calibration table, ``calibration.csv`` next to this script:
+  each field key with its file, the recorded optics (objective, zoom, pixel size) and the
+  pixel size used, with its source.
 
-Pixel size: files taken with the stronger objective record the 20x objective in their
-metadata. Their pixel size is set to 0.2145 um from the field key (``features.pixel_um``),
-not read from the file.
+Pixel size: every A1 file records the same stale optics state (20x objective, zoom 1.515,
+0.429 um/px), also the files taken with the stronger objective. The pixel size used comes from
+the stage calibration, 0.650 um at 20x and 0.325 um at 40x (``features.PIXEL_UM``), not from the
+file.
 
   python nd2_link.py meta --repo data-mt --out nd2
   python nd2_link.py map  --repo data-mt --out nd2
   python nd2_link.py dna  --repo data-mt --masks v2r2_masks --quality quality.csv --out nd2
+  python nd2_link.py calibration --repo data-mt --out nd2       # -> calibration.csv next to this script
 """
 from __future__ import annotations
 
@@ -45,7 +50,7 @@ NAME = re.compile(r'H_P3-2-(Static|1\.4Pa)_A_70c-30T_(\d\d)-\d\d\.12\.21(_40x)?-
 FOLDER = {('0Pa', '20x'): 'Static-x20', ('0Pa', '40x'): 'Static-x40', ('1.4Pa', '20x'): '1.4Pa-x20',
           ('1.4Pa', '40x'): '1.4Pa-x40'}
 DAPI = 'WF 395'
-ENLARGED_UM2 = 95.7
+ENLARGED_UM2 = 95.7 * ft.AREA     # 219.7 um2: the static antimode of by_shear.py (95.7 at the recorded pixel)
 BINS = [0, 0.6, 1.4, 1.7, 2.6, 99]
 CLASSES = ['<0.6', '2N', 'S', '4N', '>2.6']
 
@@ -71,11 +76,12 @@ def meta(repo):
         with nd2.ND2File(obj) as f:
             r['sizes'] = json.dumps(dict(f.sizes))
             vs = f.voxel_size()
-            r.update(px_um=vs.x, z_um=vs.z)
+            r.update(recorded_px_um=vs.x, z_um=vs.z)                  # the recorded calibration (stale)
             ch = f.metadata.channels
             r['channels'] = '|'.join(c.channel.name for c in ch)
             mic = ch[0].microscope
-            r.update(objective=mic.objectiveName, mag=mic.objectiveMagnification, na=mic.objectiveNumericalAperture)
+            r.update(objective=mic.objectiveName, mag=mic.objectiveMagnification, na=mic.objectiveNumericalAperture,
+                     zoom=mic.zoomMagnification)
             pos = f.frame_metadata(0).channels[0]
             r.update(x_um=pos.position.stagePositionUm[0], y_um=pos.position.stagePositionUm[1],
                      z0_um=pos.position.stagePositionUm[2], jdn=pos.time.absoluteJulianDayNumber)
@@ -126,7 +132,7 @@ def dna_sums(stack, nuclei, um):
     st = np.asarray(stack, np.float32)
     st = st - np.percentile(st, 5, axis=(1, 2), keepdims=True)
     s = st.sum(0)
-    r_in, r_bg = int(round(1.0 / um)), int(round(3.0 / um))
+    r_in, r_bg = int(round(1.0 * ft.SCALE / um)), int(round(3.0 * ft.SCALE / um))     # 1.5 and 4.5 um
     grown = ndi.grey_dilation(nuclei, size=(2 * r_in + 1, 2 * r_in + 1))
     grown[nuclei > 0] = nuclei[nuclei > 0]
     ring = ndi.grey_dilation(nuclei, size=(2 * r_bg + 1, 2 * r_bg + 1))
@@ -144,7 +150,7 @@ def dna_sums(stack, nuclei, um):
 
 def dna_index(d, enlarged_um2=ENLARGED_UM2):
     """Normalise each field by its normal-size nuclei; classify 2N / S / 4N."""
-    d = d[d.area_um2 >= 25].copy()
+    d = d[d.area_um2 >= 25 * ft.AREA].copy()          # 57 um2
     d['enlarged'] = d.area_um2 > enlarged_um2
 
     def norm(g):
@@ -180,9 +186,23 @@ def dna(repo, masks, m, k, skip):
     return dna_index(pd.concat(rows, ignore_index=True))
 
 
+def calibration(m, k):
+    """Per-file calibration: field key, file, recorded optics and the pixel size used (stage)."""
+    m = m.assign(nd2=m.path.map(os.path.basename))
+    d = k[['key', 'nd2_best']].rename(columns={'nd2_best': 'nd2'}).merge(m, on='nd2', how='left')
+    mag = d.key.map(lambda key: '40x' if key.split('_')[3].startswith('40x') else '20x')
+    rec = d['recorded_px_um'] if 'recorded_px_um' in d else d['px_um']
+    return pd.DataFrame(dict(
+        key=d.key, nd2=d.nd2, recorded_objective=d.objective, recorded_zoom=d.zoom, recorded_px_um=rec,
+        magnification=mag, px_um=mag.map(ft.PIXEL_UM),
+        source=np.where(mag == '20x',
+                        'stage: 1.4Pa 19dec21 seq013/seq016, 102.8 um = 158 px (stage_calibration.py)',
+                        'half the 20x pixel: objective ratio, nuclei 3.8-4.0x larger in pixels'))).sort_values('key')
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    ap.add_argument('step', choices=['meta', 'map', 'dna'])
+    ap.add_argument('step', choices=['meta', 'map', 'dna', 'calibration'])
     ap.add_argument('--repo', required=True, help='data repository with Original/*.nd2 in Git LFS')
     ap.add_argument('--out', required=True)
     ap.add_argument('--masks', help='refine_v2.py output (<cond>/<key>_v2_nuclei.tif), for dna')
@@ -192,11 +212,15 @@ def main(argv=None):
     if a.step == 'meta':
         d = meta(a.repo)
         d.to_csv(f'{a.out}/nd2_meta.csv', index=False)
-        print(d[['path', 'objective', 'px_um', 'z_um', 'x_um', 'y_um', 'acquired']].to_string(index=False))
+        print(d[['path', 'objective', 'zoom', 'recorded_px_um', 'z_um', 'x_um', 'y_um', 'acquired']].to_string(index=False))
     elif a.step == 'map':
         d = mapping(a.repo, pd.read_csv(f'{a.out}/nd2_meta.csv'))
         d.to_csv(f'{a.out}/key_map.csv', index=False)
         print(len(d), 'keys mapped; lowest correlation', round(d.corr_best.min(), 3))
+    elif a.step == 'calibration':
+        d = calibration(pd.read_csv(f'{a.out}/nd2_meta.csv'), pd.read_csv(f'{a.out}/key_map.csv'))
+        d.to_csv(os.path.join(HERE, 'calibration.csv'), index=False)
+        print(d.groupby(['magnification', 'recorded_zoom', 'recorded_px_um', 'px_um']).size().to_string())
     else:
         import analyze as an
         d = dna(a.repo, a.masks, pd.read_csv(f'{a.out}/nd2_meta.csv'), pd.read_csv(f'{a.out}/key_map.csv'),

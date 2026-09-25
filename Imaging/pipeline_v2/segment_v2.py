@@ -46,8 +46,8 @@ import seg_eval as se  # noqa: E402
 import features as ft  # noqa: E402
 
 CONDS = ['Static-x20', '1.4Pa-x20', 'Static-x40', '1.4Pa-x40']
-CELL_DIAMETER_UM = 25.7     # 60 px at 20x, 120 px at 40x
-NUC_DIAMETER_UM = 11.2      # 26 px at 20x, 52 px at 40x
+CELL_DIAMETER_UM = 25.7 * ft.SCALE     # 38.9 um: 60 px at 20x, 120 px at 40x (features.SCALE)
+NUC_DIAMETER_UM = 11.2 * ft.SCALE      # 17.0 um: 26 px at 20x, 52 px at 40x
 NUCLEAR_PROJECTION = {'20x': 'tophat', '40x': 'background'}
 DUPLICATE = re.compile(r'\s?\(\d+\)')
 

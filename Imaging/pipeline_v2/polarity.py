@@ -11,7 +11,7 @@ did not align.
   on the log Golgi top-hat projection (pixels inside cells). The polarity vector runs from
   the centroid of the cell's largest nucleus (a nucleus belongs to the cell covering more
   than half of it) to the intensity-weighted Golgi centroid. Kept: interior cells over
-  50 um^2 with a nucleus and a vector longer than 1 um.
+  115 um^2 with a nucleus and a vector longer than 1.5 um.
 * **Per group** (condition x experiment, and per field): the mean resultant length R of the
   unit vectors (0 = no preferred side, 1 = every Golgi on the same side), its direction in
   degrees counter-clockwise from the image +x axis (image y points down, so 180 = left)
@@ -41,8 +41,8 @@ import seg_eval as se  # noqa: E402
 import features as ft  # noqa: E402
 import analyze as an  # noqa: E402
 
-MIN_CELL_UM2 = 50.0
-MIN_VECTOR_UM = 1.0
+MIN_CELL_UM2 = 50.0 * ft.AREA     # 115 um2 (features.SCALE)
+MIN_VECTOR_UM = 1.0 * ft.SCALE     # 1.5 um
 
 
 def golgi_vectors(cells, nuclei, golgi, um):

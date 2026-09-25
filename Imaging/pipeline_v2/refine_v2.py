@@ -12,15 +12,15 @@ Cellpose's separation of neighbouring cells, but lets each cell grow over the
   and nuclei that no Cellpose cell covers (missed cells). Smaller nucleus-free
   fragments are not markers, so their pixels go to the neighbour whose basin they
   belong to;
-* landscape: β-catenin top-hat smoothed with sigma = 1 um, so junctions are ridges;
+* landscape: β-catenin top-hat smoothed with sigma = 1.5 um, so junctions are ridges;
 * mask: every pixel except the gaps. Gap seeds are ``analyze.dark_gaps`` on the Cellpose
-  cells, with the nuclear-stain test. Pixels within about 1 um of a detected nucleus (a
-  dilation by round(1 um / pixel) steps: 2 px at 20x, 5 px at 40x) are never gap, so every
+  cells, with the nuclear-stain test. Pixels within about 1.5 um of a detected nucleus (a
+  dilation by round(1.5 um / pixel) steps: 2 px at 20x, 5 px at 40x) are never gap, so every
   nucleus can seed a cell. After the second review, each seed is grown over the connected
   pixels that pass the same test at the 5th percentile (the reviewer saw gaps extending
-  beyond their outline), and enclosed specks under 10 um^2 without nuclear signal are
+  beyond their outline), and enclosed specks under 23 um^2 without nuclear signal are
   filled. After the third review, a grown gap that surrounds a nucleus is removed (it is a
-  faint cell) and nucleus-free voids under 50 um^2 inside a gap are filled
+  faint cell) and nucleus-free voids under 115 um^2 inside a gap are filled
   (``analyze.nucleus_rule``).
 
 Reads the segment_v2.py output and writes, per field, to ``--out/<cond>/``:
@@ -52,7 +52,7 @@ import features as ft  # noqa: E402
 import analyze as an  # noqa: E402
 import segment_v2 as sg  # noqa: E402
 
-LANDSCAPE_SIGMA_UM = 1.0
+LANDSCAPE_SIGMA_UM = 1.0 * ft.SCALE     # 1.5 um (1 um at the recorded pixel size, features.py)
 CANDIDATE_MIN_UM2 = an.GAP_MIN_UM2
 
 
@@ -83,8 +83,8 @@ def markers(cells, nuclei):
 
 
 def refine(cells, nuclei, cad_tophat, cad_raw, nuc_img, um, grow=True):
-    # A detected nucleus (plus about 1 um) is never gap, so every nucleus can get a cell.
-    nuc_zone = ndimage.binary_dilation(nuclei > 0, iterations=max(1, int(round(1.0 / um))))
+    # A detected nucleus (plus about 1.5 um) is never gap, so every nucleus can get a cell.
+    nuc_zone = ndimage.binary_dilation(nuclei > 0, iterations=max(1, int(round(1.0 * ft.SCALE / um))))
 
     def gaps_at(pct, min_um2=CANDIDATE_MIN_UM2):
         g, t = an.dark_gaps(cells, nuclei, cad_raw, um, pct, nuc_img, min_um2)

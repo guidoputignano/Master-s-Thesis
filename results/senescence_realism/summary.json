@@ -181,7 +181,7 @@
    ]
   },
   {
-   "label": "Reported, dense monolayer (tau 6 h)",
+   "label": "Reported, slow adaptation (tau 6 h)",
    "tau": [
     1.7150157186598236,
     2.0,

@@ -16,7 +16,7 @@ cells and the seed gaps. Two masks behind reported numbers were never shown:
   multinucleated fractions (3.7 % static, 5.7 % under flow).
 
 Only the clear fields are used (the analysis folder of the quality-filtered run), and the
-fields of each shear stress are pooled. Every candidate within 10 um of an object shown in
+fields of each shear stress are pooled. Every candidate within 15 um of an object shown in
 round 1 or 2 is left out. Views as in round 2: 1 junctions, 2 haze, 3 Golgi.
 
   python build_verdicts3.py build --root data-mt --v2r v2r2_masks --analysis v2r2_analysis_clean \
@@ -68,7 +68,7 @@ def question_multi(n):
 
 
 def previous_zone(root, rounds):
-    """{key: mask within 10 um of any object shown in the earlier rounds}.
+    """{key: mask within 15 um of any object shown in the earlier rounds}.
 
     ``rounds``: (key.csv, v2 masks folder, v2 gaps analysis folder) per round, the folders
     that round showed (build_verdicts2.round1_zone checks the gap areas against the key)."""
@@ -88,8 +88,9 @@ def render_multi(rgb, cell_mask, nuc_labels, um, size=380):
     # repeat bv.render's window so the nuclei outlines land on the same pixels
     ys, xs = np.nonzero(cell_mask)
     cy, cx = (ys.min() + ys.max()) // 2, (xs.min() + xs.max()) // 2
-    half = max((ys.max() - ys.min()) // 2 + round(12.0 / um), (xs.max() - xs.min()) // 2 + round(12.0 / um),
-               round(20.0 / um))
+    pad, half_min = 12.0 * ft.SCALE, 20.0 * ft.SCALE          # 18 and 30 um, as in the rounds
+    half = max((ys.max() - ys.min()) // 2 + round(pad / um), (xs.max() - xs.min()) // 2 + round(pad / um),
+               round(half_min / um))
     side = min(2 * half + 1, cell_mask.shape[0], cell_mask.shape[1])
     y0 = int(np.clip(cy - half, 0, cell_mask.shape[0] - side))
     x0 = int(np.clip(cx - half, 0, cell_mask.shape[1] - side))

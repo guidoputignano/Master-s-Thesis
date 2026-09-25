@@ -217,7 +217,7 @@
    }
   },
   {
-   "label": "Reported, dense monolayer (T 6 h)",
+   "label": "Reported, slow adaptation (T 6 h)",
    "bound_pa": 4.0,
    "tau": [
     1.806,

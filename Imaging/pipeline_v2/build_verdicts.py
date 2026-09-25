@@ -10,7 +10,7 @@ outline. Three blocks:
 * ``enlarged``: v1 cells reported as senescent (any rule) and v2 cells in the
   enlarged mixture component (posterior > 0.5). Same question: an enlarged call is
   only meaningful if the region is one cell;
-* ``gap``: connected gap components (>= 10 um^2) of the v1 hole masks and of the v2
+* ``gap``: connected gap components (>= 23 um^2, analyze.GAP_MIN_UM2) of the v1 hole masks and of the v2
   gaps written by analyze.py. "Is the outlined area a gap in the monolayer (no cell
   covers it)?"
 
@@ -64,7 +64,9 @@ def composite(cad, nuc):
     return np.clip(np.stack([m, n, np.maximum(m, n)], -1), 0, 1)
 
 
-def render(rgb, mask, um, pad_um=12.0, min_half_um=20.0, size=420, bar_um=10.0):
+def render(rgb, mask, um, pad_um=12.0 * ft.SCALE, min_half_um=20.0 * ft.SCALE, size=420, bar_um=10.0):
+    # pads as in the three review rounds (18 and 30 um); the bar is a true 10 um (the rounds drew 15 um,
+    # at the recorded pixel size)
     """Plain crop (with a scale bar) | the same crop with the object outlined in yellow."""
     ys, xs = np.nonzero(mask)
     cy, cx = (ys.min() + ys.max()) // 2, (xs.min() + xs.max()) // 2

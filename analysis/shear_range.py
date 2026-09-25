@@ -58,7 +58,7 @@ SCENARIOS = [
     ('Calibrated shear only: range 0-1.4 Pa', dict(tau_max_pa=1.4), {}),
     ('Set point 3.5 Pa (chamber tolerance +/-14 % kept below 4 Pa)', dict(tau_max_pa=3.5), {}),
     ('Reported, 0.5 Pa/h ramp limit', {}, dict(delta_tau_max=0.5)),
-    ('Reported, dense monolayer (T 6 h)', dict(tau_adapt_hours=6.0, tau_orient_hours=6.0), {}),
+    ('Reported, slow adaptation (T 6 h)', dict(tau_adapt_hours=6.0, tau_orient_hours=6.0), {}),
     ('Reported, inherited fraction 0.20', dict(initial_senescent_fraction=0.20), {}),
 ]
 TARGET_SHEARS = (1.4, 2.0, 2.5, 3.0, 3.5, 4.0)   # healthy-cell plateau along the gate (design table)

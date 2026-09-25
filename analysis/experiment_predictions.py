@@ -16,9 +16,10 @@ higher than the hand-drawn outlines of the reference data). Two bands are given:
   constant from the 6-8 h plateau in the same chamber, the plateau at 1.4 Pa, the
   activation shear that carries the targets above 1.4 Pa, the senescent cells);
 * ``literature``: the same, with the adaptation constant widened to the slower kinetics
-  other HUVEC studies report (PARAMS['T_lit_h']). Dense monolayers, as in A1 (no
-  alignment after 6 h), can be slower still; the design should therefore control and
-  report the density.
+  other HUVEC studies report (PARAMS['T_lit_h']). Mixed monolayers, as in A1 (no
+  alignment after 6 h at normal density), can be slower still; the design should
+  therefore control and report the senescent share, the density and the days since
+  confluence.
 
 Gap area is not a state of the model. Its band (GAP) comes from the A1 slides (the static
 gap fraction and the flow/static ratio at 6 h) and from the direction the literature gives
@@ -76,7 +77,7 @@ HYPOTHESES = {
 ROBOTTI_LONG_CONFLUENT = ([0.0, 1.4, 4.0, 5.0, 6.0, 8.0], [45.0, 38.0, 36.5, 21.5, 43.5, 39.5])
 THETA_PERP_DEG = 70.0
 FIELD_SD_DEG = 7.1   # spread of the mean angle between fields, A1 flow fields (IMAGING_VALIDATION, section 7)
-A1_FLOW_6H = dict(share=0.30, shear_pa=1.4, time_h=6.0, angle=41.6, sd=7.1, fields=33)   # A1, dense monolayers
+A1_FLOW_6H = dict(share=0.30, shear_pa=1.4, time_h=6.0, angle=41.6, sd=7.1, fields=33)   # A1, 30 % senescent, 6 h
 
 # Gap area fraction (% of the field): bounds (low, high), not model predictions.
 GAP = {
