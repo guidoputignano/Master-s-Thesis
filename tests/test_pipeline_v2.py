@@ -416,6 +416,13 @@ def test_export_flags_objective_that_does_not_match_the_file_name(tmp_path, monk
     assert 'does not match' in capsys.readouterr().err
 
 
+def test_export_nd2_finds_the_nikon_dapi_channel():
+    """A1's files name DAPI 'WF 395' and other Nikon files '395 Confocal'; neither says DAPI."""
+    en = pytest.importorskip('export_nd2')
+    assert all(en.DAPI_RE.search(n) for n in ('WF 395', '395 Confocal', 'DAPI', 'Hoechst 405'))
+    assert not any(en.DAPI_RE.search(n) for n in ('WF 470', 'WF 555', '555 Confocal', 'Mono'))
+
+
 def test_export_nd2_metadata_planes_and_dapi_sum(tmp_path, monkeypatch):
     """Fake .nd2 files: A1 only, corrected 40x pixel, sharpest plane, DAPI sum, zips, --check."""
     import types

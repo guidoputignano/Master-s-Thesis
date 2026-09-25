@@ -49,7 +49,7 @@ from export_from_drive import ROOT, SplitZip  # noqa: E402
 # The A1 experiment only (see export_from_drive.CONDITIONS); keys look like 1.4Pa_A1_20dec21_40x_...
 CONDITIONS = ['0Pa_A1_20x', '0Pa_A1_40x', '1.4Pa_A1_20x', '1.4Pa_A1_40x']
 CORRECT_PX_UM = {'20x': 0.429, '40x': 0.2145}   # as Imaging/pipeline_v2/features.PIXEL_UM
-DAPI_RE = re.compile(r'dapi|hoechst|405|nuc', re.I)
+DAPI_RE = re.compile(r'dapi|hoechst|405|395|nuc', re.I)   # 395: the Nikon 'WF 395' / '395 Confocal' channels
 META_FIELDS = ['key', 'condition', 'file', 'objective', 'recorded_magnification', 'na',
                'recorded_px_um', 'px_um', 'px_note', 'z_step_um', 'n_z', 'n_c', 'height', 'width',
                'dtype', 'channels', 'exposure_ms', 'stage_x_um', 'stage_y_um', 'stage_z_um',
