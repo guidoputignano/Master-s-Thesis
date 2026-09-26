@@ -103,8 +103,9 @@ def optimise_device(thetas, surfaces, budget=24.0, hold=2.0, maxiter=40, fd=0.02
 
 
 def simplify_device(x, thetas, surfaces, budget=24.0, hold=2.0, tol=0.01, step=0.05):
-    """The best two-level flow path (a fraction from the start, then operating flow) if it scores
-    within tol of x, else x. Returns (knots, robust score, simple)."""
+    """The operating flow from the start if it scores within tol of x, else the best two-level
+    flow path (a fraction from the start, then operating flow) if it does, else x.
+    Returns (knots, robust score, simple)."""
     nk = len(x)
     tk = np.arange(nk) * Dsg.KNOT
     s_opt = evaluate_device(u_path(x, budget, hold)[None], thetas, surfaces, budget, hold)[0]["area"]["robust"]
@@ -116,6 +117,8 @@ def simplify_device(x, thetas, surfaces, budget=24.0, hold=2.0, tol=0.01, step=0
         rows = evaluate_device(np.array([u_path(k, budget, hold) for k in cands[i:i + 40]]), thetas, surfaces,
                                budget, hold)
         sc += [r["area"]["robust"] for r in rows]
+    if sc[0] >= s_opt - tol:                                    # cands[0]: operating flow at once
+        return cands[0], float(sc[0]), True
     i = int(np.argmax(sc))
     if sc[i] >= s_opt - tol:
         return cands[i], float(sc[i]), True

@@ -145,9 +145,14 @@ def two_level(level, switch, target):
 
 
 def simplify(x, target, thetas, tol=0.01, step=0.1):
-    """The simplest path within tol of the optimum x: the best two-level path (a level from the
-    start, then the target) if it scores within tol, else x. Returns (knots, robust score, simple)."""
+    """The simplest path within tol of the optimum x: the direct step if it scores within tol, else
+    the best two-level path (a level from the start, then the target) if it does, else x.
+    Returns (knots, robust score, simple)."""
     s_opt = float(robust(evaluate(path(x, target)[None], target, thetas)["score"])[0])
+    direct = np.full(n_knots(target), target.tau)
+    s_direct = float(robust(evaluate(path(direct, target)[None], target, thetas)["score"])[0])
+    if s_direct >= s_opt - tol:
+        return direct, s_direct, True
     levels = np.arange(target.tau_min, target.tau_max + 1e-9, step)
     switches = np.arange(0.0, target.budget - target.hold + 1e-9, KNOT)
     cands = [two_level(L, T, target) for T in switches for L in (levels if T > 0 else [target.tau])]

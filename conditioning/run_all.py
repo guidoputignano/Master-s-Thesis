@@ -77,10 +77,15 @@ def experiment(thetas, t_end=20.0):
 
 
 def _map_one(args):
-    s, tau, thetas, budget = args
+    s, tau, thetas, budget = args[:4]
+    x_prev = args[4] if len(args) > 4 else None
     tg = D.Target(tau=tau, surface=s, budget=budget, hold=2.0)
     t0 = time.time()
-    x_opt, s_opt = D.optimise(tg, thetas, maxiter=60)
+    if x_prev is None:
+        x_opt, s_opt = D.optimise(tg, thetas, maxiter=60)
+    else:       # reuse a stored optimum; only the simplification and the comparison are redone
+        x_opt = np.asarray(x_prev, float)
+        s_opt = float(D.robust(D.evaluate(D.path(x_opt, tg)[None], tg, thetas)["score"])[0])
     x, score, simple = D.simplify(x_opt, tg, thetas)
     comp = D.compare(tg, thetas, designed=x)
     print(f"  map {s:14s} {tau:5.1f} Pa: designed {comp[0]['robust']:.2f} "
@@ -89,21 +94,35 @@ def _map_one(args):
                 optimum_score=s_opt, comparison=comp)
 
 
-def conditioning_map(thetas, targets, surfaces, budget=12.0, processes=3):
+def conditioning_map(thetas, targets, surfaces, budget=12.0, processes=3, previous=None):
+    """Designs for every target and surface; with `previous` (a stored map), its optima are reused."""
     from multiprocessing import Pool
-    jobs = [(s, tau, thetas, budget) for s in surfaces for tau in targets]
+    prev = {} if previous is None else {(r["surface"], r["target"]): r["optimum_knots"] for r in previous["rows"]}
+    jobs = [(s, tau, thetas, budget, prev.get((s, tau))) for s in surfaces for tau in targets]
     with Pool(processes) as pool:
         rows = pool.map(_map_one, jobs, chunksize=1)
     return dict(budget=budget, knot_h=D.KNOT, post_h=D.POST, rows=rows)
 
 
-def device_case(thetas, budget=12.0):
+def device_case(thetas, budget=12.0, previous=None):
+    """With `previous` (a stored device.json), its optima are reused: the operating flow at once is
+    taken if it scores within 0.01 of the optimum, else the stored simplified path is kept."""
     flat = ["silicone_flat"] * len(DV.REGIONS)
     graded = ["silicone_perp" if tau > 3.0 else "silicone_flat" for tau in DV.REGIONS]
     out = {}
     for label, surfs in (("flat everywhere", flat), ("gratings across the flow above 3 Pa", graded)):
-        x_opt, s_opt = DV.optimise_device(thetas, surfs, budget=budget)
-        x, score, simple = DV.simplify_device(x_opt, thetas, surfs, budget=budget)
+        prev = None if previous is None else previous["cases"].get(label)
+        if prev is None:
+            x_opt, s_opt = DV.optimise_device(thetas, surfs, budget=budget)
+            x, score, simple = DV.simplify_device(x_opt, thetas, surfs, budget=budget)
+        else:
+            x_opt, s_opt = np.array(prev["optimum_u"]), prev["optimum_score"]
+            ones = np.ones(len(x_opt))
+            s_direct = DV.evaluate_device(DV.u_path(ones, budget)[None], thetas, surfs, budget)[0]["area"]["robust"]
+            if s_direct >= s_opt - 0.01:
+                x, score, simple = ones, s_direct, True
+            else:
+                x, simple = np.array(prev["designed_u"]), prev["simple"]
         nk = len(x)
         tk = np.arange(nk) * D.KNOT
         strategies = {
@@ -165,6 +184,8 @@ def main():
     ap.add_argument("--recalibrate", action="store_true")
     ap.add_argument("--quick", action="store_true", help="fewer targets and surfaces")
     ap.add_argument("--parts", nargs="+", default=["experiment", "map", "device", "profile", "loop"])
+    ap.add_argument("--reuse-optima", action="store_true",
+                    help="map and device: reuse the stored optima (redo the simplification only)")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -191,10 +212,13 @@ def main():
     if "map" in a.parts:
         targets = [1.0, 2.0, 3.0, 5.0, 8.0] if a.quick else [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]
         surfaces = ["silicone_flat"] if a.quick else ["silicone_flat", "silicone_bf", "silicone_perp"]
-        json.dump(conditioning_map(thetas, targets, surfaces), open(out / "conditioning_map.json", "w"))
+        previous = json.load(open(out / "conditioning_map.json")) if a.reuse_optima else None
+        json.dump(conditioning_map(thetas, targets, surfaces, previous=previous),
+                  open(out / "conditioning_map.json", "w"))
         print(f"map done ({time.time() - t0:.0f} s)", flush=True)
     if "device" in a.parts:
-        json.dump(device_case(thetas), open(out / "device.json", "w"))
+        previous = json.load(open(out / "device.json")) if a.reuse_optima else None
+        json.dump(device_case(thetas, previous=previous), open(out / "device.json", "w"))
         print(f"device done ({time.time() - t0:.0f} s)", flush=True)
     if "profile" in a.parts:
         json.dump(C.profile(theta), open(out / "profile_tau_x.json", "w"), indent=1)
