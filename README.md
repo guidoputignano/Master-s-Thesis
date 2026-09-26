@@ -4,6 +4,35 @@ This repository contains the complete body of work for the Master's Thesis by Gu
 
 ---
 
+## Target-specific conditioning (paper, 2026)
+
+The package [`conditioning/`](./conditioning) holds the model and the protocol designer of the paper
+*Target-Specific Shear Conditioning of Endothelial Monolayers for Blood-Contacting Devices*:
+
+- `observations.py`: every published value used (Stefopoulos 2022, Robotti 2014, Wu 2021, same chamber),
+  with its source, panel, how it was read and its role (train or held out);
+- `model.py` and `_kernel.py`: the monolayer-state model (domains ordered along or across the flow,
+  frustrated domains, junction destabilisation, damage, cell retention), in NumPy and compiled with numba;
+- `calibrate.py`: least squares with priors, tempered ensemble, scenario ensembles with the switch shear
+  held fixed, the profile of the switch shear split by data source, leave-one-out refits;
+- `design.py`: protocol design for a target shear, robust over the ensemble (mean minus standard deviation
+  of a readiness score, with a small penalty on changes of shear), reported as the simplest near-optimal
+  path (the best two-level path within 0.01 of the optimum);
+- `device.py`: one pump flow for a whole device (HVAD inflow cannula, eight regions);
+- `closed_loop.py`: receding-horizon design with imaging feedback (orientation and density), with a belief
+  that also covers a switch shear outside the range the designs assume;
+- `run_all.py`: reproduces every result, written to `results/conditioning/`:
+
+  ```
+  python -m conditioning.run_all --parts experiment map device profile loop
+  ```
+
+  (parts can run in separate processes; the map takes about 20 min on four cores).
+
+Tests: `python -m pytest tests/test_conditioning.py`. The earlier receding-horizon controller in
+`endothelial_simulation/control/mpc_controller.py` (single relaxation toward shear-dependent targets,
+senescent-cell ladder, tessellation) is kept for the thesis record and is not used by the paper.
+
 ##  Workflow Overview
 
 The project follows a structured workflow, where each component builds upon the last:

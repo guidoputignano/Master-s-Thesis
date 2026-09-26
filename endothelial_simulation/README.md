@@ -6,7 +6,7 @@ This repository contains a sophisticated, agent-based computational model for si
 
 - **Agent-Based Modeling**: Each endothelial cell is an individual agent with its own state and properties.
 - **Event-Driven Architecture**: The simulation progresses based on discrete events, allowing for efficient and flexible modeling of complex biological processes.
-- **Advanced Control Systems**: Includes a Model Predictive Control (MPC) module (`control/mpc_controller.py`) to simulate external interventions and control strategies.
+- **Advanced Control Systems**: Includes a receding-horizon controller (`control/mpc_controller.py`). It advances its own model rather than a measured state, so it is an open-loop protocol optimiser; it is kept for the thesis record. The paper uses the `conditioning/` package at the repository root instead.
 - **Rich Biophysical Models**: Incorporates detailed models for population dynamics (proliferation, senescence), spatial properties (cell shape, orientation), and temporal dynamics.
 - **Simulation Management**: Features robust configuration management and modules for specialized simulation scenarios like optimal stopping problems.
 - **Comprehensive Visualization**: Extensive tools for generating plots, animations, and composite videos to analyze simulation results, including cell distributions and energy metrics.
