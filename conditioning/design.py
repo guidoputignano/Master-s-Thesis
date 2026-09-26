@@ -10,10 +10,11 @@ It must end with `hold` hours at the target; the monolayer then stays at the tar
 so a path that leaves the monolayer in the wrong ordered state (which would collapse after
 implantation) or breaks it on the way scores low. Over an ensemble of parameter sets the design
 maximises mean(score) - LAMBDA * sd(score) - MU_TV * (total variation of the path), the last term
-a small penalty on changes of shear (as on input moves in predictive control) that removes
-oscillations the score cannot tell apart; a path that only rises costs MU_TV * target whatever its
-shape (up to the smoothing, 0.05 Pa per knot). Scores are reported without the penalty. Gradients
-are finite differences in one batch.
+a small, smoothed L1 penalty on changes of shear (move suppression, as in predictive control) that
+removes oscillations the score cannot tell apart; a path that only rises costs MU_TV * target
+whatever its shape (up to the smoothing, 0.05 Pa per knot). All parameter sets share one input
+path (no recourse). The weights, LAMBDA, MU_TV and the windows are design choices. Scores are
+reported without the penalty. Gradients are finite differences in one batch.
 """
 from dataclasses import dataclass
 
@@ -22,7 +23,7 @@ from scipy.optimize import minimize
 
 from . import model as M
 
-KNOT = 0.5          # h between knots (the decision interval)
+KNOT = 0.5          # h between knots (the input parametrisation; decisions: closed_loop.DECIDE)
 POST = 24.0         # h at the target after conditioning
 W_ORDER = 0.5
 W_DAMAGE = 4.0
@@ -103,22 +104,24 @@ def robust(score, weights=None):
     return m - LAMBDA * np.sqrt(np.maximum(((score - m[:, None]) ** 2) @ w, 0.0))
 
 
-def objective(knot_sets, target, thetas, weights=None):
-    """The optimal-control objective of each knot vector: robust score minus the move penalty."""
+def objective(knot_sets, target, thetas, weights=None, mu=None):
+    """The optimal-control objective of each knot vector: robust score minus the move penalty
+    (weight mu, MU_TV unless given)."""
     knot_sets = np.atleast_2d(knot_sets)
+    mu = MU_TV if mu is None else mu
     sc = robust(evaluate(np.array([path(k, target) for k in knot_sets]), target, thetas)["score"], weights)
-    return sc - MU_TV * np.array([variation(k, target) for k in knot_sets])
+    return sc - mu * np.array([variation(k, target) for k in knot_sets])
 
 
 def baselines(target):
-    """Reference paths: direct step, the usual start (1 h at 1.4 Pa), a slow 8 h ramp and aligned
-    preconditioning (8 h at 1.4 Pa) before the target."""
+    """Reference paths: direct step, 1 h at 1.4 Pa first (the start used by Wu et al. 2021), a slow
+    8 h ramp and aligned preconditioning (8 h at 1.4 Pa) before the target."""
     nk = n_knots(target)
     tk = np.arange(nk) * KNOT
     tau = target.tau
     ref = {
         "direct": np.full(nk, tau),
-        "usual start (1 h at 1.4 Pa)": np.where(tk < 1.0, 1.4, tau),
+        "1 h at 1.4 Pa first": np.where(tk < 1.0, 1.4, tau),
         "slow ramp (8 h)": np.minimum(tk / 8.0, 1.0) * tau,
         "aligned first (8 h at 1.4 Pa)": np.where(tk < 8.0, 1.4, tau),
     }
@@ -126,7 +129,7 @@ def baselines(target):
 
 
 def optimise(target, thetas, starts=None, maxiter=60, fd=0.05, verbose=False, weights=None, free=None,
-             fixed=None):
+             fixed=None, mu=None):
     """Solve the optimal-control problem: maximise the (optionally belief-weighted) robust score minus
     the move penalty over the free knots, each in [tau_min, tau_max]; knots not free keep the values of
     `fixed` (the part of the path already applied, in receding-horizon use). Returns the knots and
@@ -145,7 +148,7 @@ def optimise(target, thetas, starts=None, maxiter=60, fd=0.05, verbose=False, we
 
     def f_and_grad(z):
         Z = np.clip(np.vstack([z] + [z + fd * np.eye(nf)[i] for i in range(nf)]), target.tau_min, target.tau_max)
-        obj = objective(np.array([full(v) for v in Z]), target, thetas, weights)
+        obj = objective(np.array([full(v) for v in Z]), target, thetas, weights, mu)
         return -obj[0], -(obj[1:] - obj[0]) / fd
 
     best = None

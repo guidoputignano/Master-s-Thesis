@@ -9,16 +9,16 @@ except ImportError:                                   # pragma: no cover
 
 
 def _kernel(shear, P, idx, bias, f, prot_grat, coc, preorder, pp1, dt, tau_act, n_single,
-            m_drag, tau_ref, k_relax):
+            tau_ref, k_relax):
     n_steps, n = shear.shape
     rec = np.zeros((7, n_steps, n))
-    (i_tau_x, i_w_x, i_k_ord, i_rho_c, i_kappa, i_beta_j, i_k_x, i_k_col, i_j50, i_q, i_t_p, i_tau_d,
+    (i_tau_x, i_w_x, i_k_ord, i_rho_c, i_kappa, i_beta_j, i_k_x, i_k_col, i_j50, i_q, i_t_p,
      i_k_sp, i_seed, i_tau_j, i_t_j, i_th_a, i_th_c, i_delta_x, i_k_heal, i_k_lim, i_lim, i_lim_coc,
      i_d_grat, i_pi_grat, i_b_topo, i_a_grat, i_f_coc, i_k_rx, i_k_rd, i_k_rt, i_tau_r) = idx
     for j in range(n):
         tau_x = P[i_tau_x, j]; w_x = P[i_w_x, j]; k_ord = P[i_k_ord, j]; rho_c = P[i_rho_c, j]
         kappa = P[i_kappa, j]; beta_j = P[i_beta_j, j]; k_x = P[i_k_x, j]; k_col = P[i_k_col, j]
-        qh = P[i_q, j]; q50 = P[i_j50, j] ** qh; t_p = P[i_t_p, j]; tau_d = P[i_tau_d, j]
+        qh = P[i_q, j]; q50 = P[i_j50, j] ** qh; t_p = P[i_t_p, j]
         k_sp = P[i_k_sp, j]; seed = 10.0 ** P[i_seed, j]; tau_j = P[i_tau_j, j]; t_j = P[i_t_j, j]
         delta_x = P[i_delta_x, j]; k_heal = P[i_k_heal, j]; k_lim = P[i_k_lim, j]
         lim = (P[i_lim_coc, j] if coc[j] else P[i_lim, j]) + (P[i_d_grat, j] if prot_grat[j] else 0.0)
@@ -92,10 +92,9 @@ def _kernel(shear, P, idx, bias, f, prot_grat, coc, preorder, pp1, dt, tau_act, 
             elif Nn > 1.0:
                 Nn = 1.0
             collapse = w_hj * (a_to_x * s_a + c_to_x * s_c) / dt
-            drag = 1.0 + (tau / tau_d) ** m_drag
             mism = Nn + X + (C if pref >= 0 else A)
             ov = tau - lim
-            src = prot * delta_x * fj * collapse * drag + k_lim * (ov if ov > 0 else 0.0) / tau_ref * mism
+            src = prot * delta_x * collapse + k_lim * (ov if ov > 0 else 0.0) / tau_ref * mism
             D = 1.0 - (1.0 - D) * np.exp(-src * dt)
             D = D * np.exp(-k_heal * (1.0 - X) * dt)
             tr = tau - tau_r

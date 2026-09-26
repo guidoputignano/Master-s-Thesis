@@ -143,3 +143,16 @@ def test_mpc_never_changes_applied_shear():
         assert np.allclose(before[applied], after[applied])
     assert np.allclose(plans[-1], run["knots"])
     assert run["knots"].min() >= tg.tau_min and run["knots"].max() <= tg.tau_max
+
+
+def test_scenario_chain_moves_and_holds_the_fixed_parameter():
+    from conditioning import calibrate as C
+    i = M.NAMES.index("tau_x")
+    x0 = M.X0.copy()
+    x0[i] = 3.0
+    cov0 = np.diag((0.01 * (M.HI - M.LO)) ** 2)
+    smp, acc = C._chain((x0, cov0, (i,), 3.0, 800, 6, 0))
+    assert smp.shape == (6, len(M.NAMES))
+    assert np.all(smp[:, i] == 3.0)
+    assert len(np.unique(smp.round(12), axis=0)) == 6          # the chain moves between kept samples
+    assert 0.0 < acc < 1.0

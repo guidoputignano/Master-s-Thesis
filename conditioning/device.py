@@ -2,16 +2,17 @@
 
 An HVAD inflow cannula at its operating point (Ghodrati et al., Artif Organs 2020, two patients):
 18-33 % of its surface below 0.3 Pa, 59-72 % between 0.3 and 9 Pa, 8-10 % above 9 Pa at the tip.
-We take the means of the two patients and spread the middle band log-uniformly over six regions
-(its distribution within the band is not reported); the tip is represented at 11 Pa, beyond the
-calibrated range (flagged). When the device is conditioned in a mock loop, every region's shear
-scales with the pump flow: tau_i(t) = tau_i(operating) * u(t), with u the flow fraction.
+Only these three band areas are reported. We take the means of the two patients (25.5, 65.5 and
+9 %), place the lowest band at 0.15 Pa, split the middle band equally over six levels of our choice
+(0.5, 1, 2, 3.5, 5.5 and 8 Pa) and put the tip at 11 Pa, beyond the calibrated range (flagged). We
+assume that when the device is conditioned in a mock loop every region's shear scales linearly with
+the pump flow: tau_i(t) = tau_i(operating) * u(t), with u the flow fraction.
 
 Strategies compared, all ending with the device at its operating flow for POST hours:
 - in-device, designed: u(t) chosen by the designer for the area-weighted score;
 - in-device, direct: operating flow from the start;
 - in-device, slow ramp: u from 0 to 1 over 8 h;
-- chamber at 1.4 Pa: the usual uniform conditioning, then implantation (each region jumps to its shear).
+- chamber at 1.4 Pa: uniform conditioning in a chamber, then implantation (each region jumps to its shear).
 
 A region counts as connected when its junction connectivity is at least 0.8 at the end of the 24 h
 at operating flow; cells retained and the fraction ordered as the local shear demands are reported
@@ -75,7 +76,8 @@ def u_path(knots, budget=24.0, hold=2.0):
     return u
 
 
-MU_U = 0.02        # score per unit of total variation of the flow fraction (cf. design.MU_TV)
+MU_U = 0.02        # score per unit of total variation of the flow fraction (a separate choice from
+                   # design.MU_TV, which is per Pa)
 
 
 def optimise_device(thetas, surfaces, budget=24.0, hold=2.0, maxiter=40, fd=0.02, starts=None):

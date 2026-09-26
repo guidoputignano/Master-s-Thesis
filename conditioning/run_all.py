@@ -1,15 +1,18 @@
-"""Reproduce every conditioning result used in the paper.
+"""Reproduce every conditioning result used in the paper (all of them simulations).
 
     python -m conditioning.run_all [--out results/conditioning] [--recalibrate] [--quick]
                                    [--parts experiment map device profile loop]
 
-Writes JSON files to --out: calibration.json (if --recalibrate or missing), experiment.json,
+Writes JSON files to --out: calibration.json (fit, ensemble, held-out predictions, leave-out
+refits and scenario ensembles; recomputed with --recalibrate or when missing), experiment.json,
 conditioning_map.json, device.json, profile_tau_x.json, closed_loop.json (parts can run in
-separate processes).
+separate processes). The first model version (calibration_v1_substrate_limits.json) is archived as
+it was run, with its code as text; it is not rerun here.
 Designs use 32 sets of the calibration ensemble (seed 0) and 16 sets from each scenario of the
-switch shear (2.2, 3 and 4 Pa, refitted with the switch held fixed), so that they hold wherever
-the switch lies. Each design is reported as its simplest near-optimal form: the best two-level
-path (one level from the start, then the target) when it scores within 0.01 of the optimum.
+switch shear (2.2, 3 and 4 Pa, sampled with the switch held fixed; every other set of each chain),
+so that they hold wherever the switch lies. Each design is reported as its simplest near-optimal
+form: the direct step, or the best two-level path (one level from the start, then the target),
+when it scores within 0.01 of the optimum.
 """
 import argparse
 import json
@@ -28,6 +31,21 @@ from . import model as M
 def subset(samples, n=64, seed=0):
     rng = np.random.default_rng(seed)
     return samples[rng.choice(len(samples), min(n, len(samples)), replace=False)]
+
+
+def scenario_design(x):
+    """Every other set of a scenario chain: the sets used for design and in the controller's belief."""
+    return np.array(x["samples"])[::2]
+
+
+def scenario_held(x):
+    """The other sets of a scenario chain: monolayers the controller does not know."""
+    return np.array(x["samples"])[1::2]
+
+
+def design_thetas(d, samples):
+    """The 80 design sets: 32 of the main ensemble (seed 0) and 16 of each switch scenario."""
+    return np.vstack([subset(samples, 32)] + [scenario_design(x) for x in d["scenarios"]])
 
 
 def trajectories(paths, surface, thetas, t_end):
@@ -58,11 +76,11 @@ def experiment(thetas, t_end=20.0):
         "A: slow ramp (8 h)": np.minimum(t / 8.0, 1.0) * 8.0,
         "B: model's onset": designed,
         "direct": np.full_like(t, 8.0),
-        "usual start (1 h at 1.4 Pa)": np.where(t < 1.0, 1.4, 8.0),
+        "1 h at 1.4 Pa first": np.where(t < 1.0, 1.4, 8.0),
         "aligned first (8 h at 1.4 Pa)": np.where(t < 8.0, 1.4, 8.0),
     }
     res = {s: trajectories(paths, s, thetas, t_end) for s in ("silicone_flat", "silicone_bf")}
-    # paired difference B - A at the end, per parameter set (the registered prediction)
+    # paired difference B - A at the end, per parameter set (the predicted difference)
     diffs = {}
     for s in ("silicone_flat", "silicone_bf"):
         ends = {}
@@ -146,36 +164,75 @@ def device_case(thetas, budget=12.0, previous=None):
                 extrapolated=DV.EXTRAPOLATED.tolist(), budget=budget, cases=out)
 
 
-def closed_loop_case(thetas, extra, scenarios, t_end=20.0, seed=0):
-    """Arm B of the experiment (8 Pa, 8 h budget) against monolayers the controller does not know:
-    the median parameter set of each switch scenario (2.2 and 3 Pa, inside the range the designs
-    cover; 5.5 Pa, the second minimum of the profile, which the prior disfavours). Three strategies:
-    the open-loop design robust over the 80 design sets (arm B), an open-loop design robust also
-    over the 16 sets refitted with the switch at 5.5 Pa, and closed loop from arm B with a belief
-    over all 96 sets."""
+def _loop_one(args):
+    tg, prior, plant, x_open, seed, mu = args
+    return CL.run(tg, prior, plant, x_open, seed=seed, mu=mu)
+
+
+def closed_loop_case(thetas, extra, scenarios, t_end=20.0, n_plants=4, processes=4):
+    """Arm B of the experiment (8 Pa, 8 h budget) against monolayers the controller does not know.
+    `scenarios`: (label, held-out sets, switch value). Per scenario (2.2 and 3 Pa, inside the range
+    the designs cover; 5.5 Pa, the second minimum of the profile, which the prior disfavours), the
+    plants are n_plants parameter sets drawn from the same scenario chain but not among the
+    controller's sets, each with its own measurement-noise seed. Three strategies: the open-loop
+    design robust over the 80 design sets (arm B), an open-loop design robust also over the 16 sets
+    with the switch at 5.5 Pa, and closed loop from arm B with a belief over all 96 sets (uniform
+    prior weights). For the 2.2 and 3 Pa scenarios the closed loop is also run with a move penalty
+    ten times smaller."""
+    from multiprocessing import Pool
     tg = D.Target(tau=8.0, surface="silicone_flat", budget=8.0, hold=2.0)
     x_open, _, _ = D.simplify(D.optimise(tg, thetas, maxiter=80)[0], tg, thetas)
     prior = np.vstack([thetas, extra])
     x_wide, _, _ = D.simplify(D.optimise(tg, prior, maxiter=80)[0], tg, prior)
     t = np.arange(0.0, t_end + 1e-9, M.DT)
+    jobs, keys = [], []
+    for label, held, value in scenarios:
+        for j in range(min(n_plants, len(held))):
+            jobs.append((tg, prior, held[j], x_open, j, None))
+            keys.append((label, j, "closed"))
+            if value in (2.2, 3.0):
+                jobs.append((tg, prior, held[j], x_open, j, D.MU_TV / 10))
+                keys.append((label, j, "mu/10"))
+    with Pool(processes) as pool:
+        res = dict(zip(keys, pool.map(_loop_one, jobs, chunksize=1)))
     plants = {}
-    for label, sets in scenarios:
-        pl = np.median(sets, axis=0)
-        run = CL.run(tg, prior, pl, x_open, seed=seed)
-        wide = D.evaluate(D.path(x_wide, tg)[None], tg, pl[None])
-        traj = {}
-        for name, kn in (("open", x_open), ("open, wide", x_wide), ("closed", run["knots"])):
-            sh = D.path(kn, tg)[:len(t)]
-            r = M.simulate(sh[:, None], pl[:, None], [M.SURFACES[tg.surface]])
-            traj[name] = dict(shear=sh[::6].tolist(), **{q: r[q][::6, 0].tolist() for q in ("angle", "ci", "retention")})
-        plants[label] = dict(plant=pl.tolist(), history=run["history"], closed=run["closed"], open=run["open"],
-                             open_wide={k: float(v[0, 0]) for k, v in wide.items()},
-                             closed_knots=run["knots"].tolist(), trajectories=traj)
-        print(f"  closed loop, {label}: open matched {run['open']['matched']:.2f} R {run['open']['retention']:.3f}"
-              f" | wide matched {plants[label]['open_wide']['matched']:.2f} R {plants[label]['open_wide']['retention']:.3f}"
-              f" | closed matched {run['closed']['matched']:.2f} R {run['closed']['retention']:.3f}", flush=True)
+    for label, held, value in scenarios:
+        reps = []
+        for j in range(min(n_plants, len(held))):
+            pl = np.asarray(held[j], float)
+            run = res[(label, j, "closed")]
+            wide = D.evaluate(D.path(x_wide, tg)[None], tg, pl[None])
+            rep = dict(plant=pl.tolist(), seed=j, tau_x=float(pl[M.NAMES.index("tau_x")]), history=run["history"],
+                       open=run["open"], open_wide={k: float(v[0, 0]) for k, v in wide.items()},
+                       closed=run["closed"], closed_knots=run["knots"].tolist())
+            if (label, j, "mu/10") in res:
+                rep["closed_mu_tenth"] = res[(label, j, "mu/10")]["closed"]
+                rep["closed_mu_tenth_knots"] = res[(label, j, "mu/10")]["knots"].tolist()
+            if j == 0:
+                traj = {}
+                for name, kn in (("open", x_open), ("open, wide", x_wide), ("closed", run["knots"])):
+                    sh = D.path(kn, tg)[:len(t)]
+                    r = M.simulate(sh[:, None], pl[:, None], [M.SURFACES[tg.surface]])
+                    traj[name] = dict(shear=sh[::6].tolist(),
+                                      **{q: r[q][::6, 0].tolist() for q in ("angle", "ci", "retention")})
+                rep["trajectories"] = traj
+            reps.append(rep)
+            extra_txt = (f" | mu/10 matched {rep['closed_mu_tenth']['matched']:.2f} "
+                         f"R {rep['closed_mu_tenth']['retention']:.3f}" if "closed_mu_tenth" in rep else "")
+            print(f"  closed loop, {label}, plant {j} (tau_x {rep['tau_x']:.2f}): open matched "
+                  f"{rep['open']['matched']:.2f} R {rep['open']['retention']:.3f} | wide matched "
+                  f"{rep['open_wide']['matched']:.2f} R {rep['open_wide']['retention']:.3f} | closed matched "
+                  f"{rep['closed']['matched']:.2f} R {rep['closed']['retention']:.3f}{extra_txt}", flush=True)
+        first = reps[0]
+        plants[label] = dict(value=value, replicates=reps,
+                             **{k: first[k] for k in ("plant", "history", "open", "open_wide", "closed",
+                                                      "closed_knots", "trajectories")})
+    n_main = len(thetas) - 16 * 3
     return dict(target=tg.tau, budget=tg.budget, open_knots=x_open.tolist(), wide_knots=x_wide.tolist(),
-                t_traj=t[::6].tolist(), prior_sets=len(prior), plants=plants)
+                t_traj=t[::6].tolist(), prior_sets=len(prior), mu=D.MU_TV,
+                prior_weight={"main ensemble": n_main / len(prior), "each switch scenario": 16 / len(prior)},
+                noise=dict(angle_deg=CL.SIG_ANGLE, density=CL.SIG_R, likelihood="same as simulated noise"),
+                plants=plants)
 
 
 def main():
@@ -192,19 +249,33 @@ def main():
     cal = out / "calibration.json"
     if a.recalibrate or not cal.exists():
         theta, c2, pb = C.fit(n_starts=16, max_nfev=2500)
-        samples, temp = C.ensemble(theta, pb, n_steps=60000, thin=150)
-        C.save(cal, theta, c2, samples, pb, temp, C.held_out(samples, theta))
+        samples, temp, acc, diag = C.ensemble(theta, pb)
+        C.save(cal, theta, c2, samples, pb, temp, C.held_out(samples, theta), acceptance=acc, chains=diag)
+        print(f"calibration: chi2 {c2:.1f}, temperature {temp:.2f}; chains: mean chi2 "
+              f"{[round(x, 1) for x in diag['mean_chi2']]}, switch medians {[round(x, 2) for x in diag['chain_medians']['tau_x']]}, "
+              f"chosen {diag['chosen']} (acceptance {acc:.2f})", flush=True)
     theta, samples, d = C.load(cal)
+    if "leave_out" not in d:
+        d["leave_out"] = C.leave_out(C.LEAVE_OUT, theta)
+        json.dump(d, open(cal, "w"), indent=1)
+        print("leave-out refits done", flush=True)
+
+    def stored(sc):
+        return [dict(value=x["value"], chi2=x["chi2"], temperature=x["temperature"], acceptance=x["acceptance"],
+                     samples=x["samples"].tolist()) for x in sc]
     if "scenarios" not in d:
-        sc = C.scenario_ensemble(theta)
-        d["scenarios"] = [dict(value=x["value"], chi2=x["chi2"], samples=x["samples"].tolist()) for x in sc]
+        d["scenarios"] = stored(C.scenario_ensemble(theta, samples))
         json.dump(d, open(cal, "w"), indent=1)
-    if "scenarios_extra" not in d and "loop" in a.parts:
-        # the controller's belief also carries a switch outside the range the data allow
-        sc = C.scenario_ensemble(theta, values=(5.5,))
-        d["scenarios_extra"] = [dict(value=x["value"], chi2=x["chi2"], samples=x["samples"].tolist()) for x in sc]
+    if "scenarios_extra" not in d:
+        # the controller's belief also carries a switch outside the range the designs cover
+        d["scenarios_extra"] = stored(C.scenario_ensemble(theta, samples, values=(5.5,)))
         json.dump(d, open(cal, "w"), indent=1)
-    thetas = np.vstack([subset(samples, 32)] + [np.array(x["samples"]) for x in d["scenarios"]])
+    for x in d["scenarios"] + d["scenarios_extra"]:
+        sm = np.array(x["samples"])
+        print(f"scenario {x['value']:g} Pa: {len(np.unique(sm.round(12), axis=0))} distinct of {len(sm)}, "
+              f"acceptance {x.get('acceptance', float('nan')):.2f}", flush=True)
+
+    thetas = design_thetas(d, samples)
     t0 = time.time()
     if "experiment" in a.parts:
         json.dump(experiment(thetas), open(out / "experiment.json", "w"))
@@ -224,9 +295,10 @@ def main():
         json.dump(C.profile(theta), open(out / "profile_tau_x.json", "w"), indent=1)
         print(f"profile done ({time.time() - t0:.0f} s)", flush=True)
     if "loop" in a.parts:
-        extra = np.vstack([np.array(x["samples"]) for x in d["scenarios_extra"]])
-        scen = [(f"switch at {x['value']:g} Pa", np.array(x["samples"])) for x in d["scenarios"] if x["value"] in (2.2, 3.0)]
-        scen += [(f"switch at {x['value']:g} Pa (outside the design range)", np.array(x["samples"]))
+        extra = np.vstack([scenario_design(x) for x in d["scenarios_extra"]])
+        scen = [(f"switch at {x['value']:g} Pa", scenario_held(x), x["value"]) for x in d["scenarios"]
+                if x["value"] in (2.2, 3.0)]
+        scen += [(f"switch at {x['value']:g} Pa (outside the design range)", scenario_held(x), x["value"])
                  for x in d["scenarios_extra"]]
         json.dump(closed_loop_case(thetas, extra, scen), open(out / "closed_loop.json", "w"))
         print(f"closed loop done ({time.time() - t0:.0f} s)", flush=True)

@@ -1,10 +1,12 @@
 """Calibration of the monolayer-state model and its ensemble of accepted parameter sets.
 
 Least squares on the training observations (weighted by their sigma) with weak Gaussian priors
-(centred on the initial values, sd half the allowed range) that only keep unidentified parameters
-from drifting to their bounds. Multi-start from Latin-hypercube points. The ensemble is a
-random-walk Metropolis sample of exp(-chi2/2 - prior) started at the best fit, thinned; it carries
-the parameter uncertainty into every prediction.
+(centred on the initial values, sd half the allowed range); several parameters still end at a
+bound, which the paper reports. Multi-start: the initial values and Latin-hypercube points. The
+ensemble is an adaptive random-walk Metropolis sample of the tempered posterior
+exp(-chi2/(2T) - prior) started at the best fit, thinned; it carries the parameter uncertainty into
+every prediction. Scenario ensembles hold one weakly identified parameter (the switch shear) at a
+value and sample the others the same way.
 """
 import json
 import time
@@ -18,9 +20,12 @@ from . import observations as O
 
 PRIOR_SD = 0.5 * (M.HI - M.LO)
 PRIOR_MEAN = M.X0.copy()
-# Informative prior from studies outside the calibration set: HUVEC align along the flow at 1-2 Pa
-# and misalign above (gradient chamber, crossover 2.7 Pa; Baeyens et al., eLife 2015), and flat
-# monolayers in the reference chamber still aligned at 5 Pa (Robotti et al. 2014).
+# Prior on the switch shear: a modelling choice, not a measurement. It spans the upper edge of the
+# along-flow band of HUVEC in a gradient chamber (aligned at about 1-2 Pa, orientation crossing 45 deg
+# near 2 Pa after 16 h; Baeyens et al., eLife 2015, not in the calibration set) and higher values.
+# The lower bound of tau_x (2 Pa, model.PARAMS) is set from the same study. The 2.7 Pa of our first
+# draft was the zero crossing of the nematic analogy of Stefopoulos et al. 2022 mapped linearly onto
+# shear, not a value of Baeyens et al.
 INFORMATIVE = {"tau_x": (3.0, 0.75)}
 for _k, (_m, _s) in INFORMATIVE.items():
     PRIOR_MEAN[M.NAMES.index(_k)] = _m
@@ -100,30 +105,92 @@ def log_post(theta, pb, temperature=1.0):
     return -0.5 * float(r @ r) / temperature - 0.5 * float(pr @ pr)
 
 
-def ensemble(theta_best, pb, n_steps=40000, thin=100, seed=1, scale=0.02, temperature=None, verbose=True):
-    """Random-walk Metropolis in parameter space scaled by the prior range; adaptive step size.
-    Returns the thinned samples after a burn-in of a fifth of the chain."""
+def _chain(args):
+    """One random-walk Metropolis chain of the tempered posterior (a Pool worker).
+
+    Gaussian proposals; a proposal outside the parameter bounds is rejected. During the burn-in (a
+    quarter of the steps) the proposal scale is adapted every 500 steps toward an acceptance of 0.25,
+    and at a quarter, half and three quarters of the burn-in its covariance is re-estimated from the
+    second half of the chain so far (adaptive Metropolis), blended with cov0 at the first update; both
+    are frozen before any sample is kept. Parameters listed in `fixed` stay at their starting values.
+    Returns the n_keep thinned samples and the acceptance rate after the burn-in."""
+    x0, cov0, fixed, temperature, n_steps, n_keep, seed = args
+    pb = Problem("train")
     rng = np.random.default_rng(seed)
-    if temperature is None:
-        temperature = max(pb.chi2(theta_best) / (len(pb.y) - len(M.NAMES)), 1.0)
-    x = np.array(theta_best, float)
+    free = np.setdiff1d(np.arange(len(x0)), np.asarray(fixed, int))
+    jitter = np.diag((1e-4 * (M.HI - M.LO)[free]) ** 2)
+
+    def chol(c):
+        return np.linalg.cholesky(np.asarray(c)[np.ix_(free, free)] + jitter)
+
+    L = chol(cov0)
+    scale = 2.38 / np.sqrt(free.size)
+    x = np.array(x0, float)
     lp = log_post(x, pb, temperature)
-    width = (M.HI - M.LO) * scale
-    kept, acc = [], 0
+    burn = n_steps // 4
+    updates = {burn // 4: 0.5, burn // 2: 0.0, 3 * burn // 4: 0.0}   # step: weight of cov0
+    thin = (n_steps - burn) // n_keep
+    hist, kept, acc, acc_after = [], [], 0, 0
     for i in range(1, n_steps + 1):
-        y = x + rng.normal(size=x.size) * width
+        y = x.copy()
+        y[free] += scale * (L @ rng.normal(size=free.size))
         ly = log_post(y, pb, temperature)
         if np.log(rng.random()) < ly - lp:
-            x, lp, acc = y, ly, acc + 1
-        if i % 500 == 0:                          # keep acceptance near 0.25
-            rate = acc / 500
-            width *= np.exp(2.0 * (rate - 0.25))
-            acc = 0
-            if verbose and i % 5000 == 0:
-                print(f"step {i}: acceptance {rate:.2f}, chi2 {pb.chi2(x):.1f}", flush=True)
-        if i > n_steps // 5 and i % thin == 0:
+            x, lp = y, ly
+            acc += 1
+            acc_after += i > burn
+        if i <= burn:
+            hist.append(x.copy())
+            if i % 500 == 0:
+                scale *= np.exp(2.0 * (acc / 500 - 0.25))
+                acc = 0
+            if i in updates:
+                h = np.array(hist[len(hist) // 2:])
+                w0 = updates[i]
+                L = chol(w0 * np.asarray(cov0) + (1 - w0) * np.cov(h.T))
+                scale = 2.38 / np.sqrt(free.size)
+        elif (i - burn) % thin == 0 and len(kept) < n_keep:
             kept.append(x.copy())
-    return np.array(kept), temperature
+    return np.array(kept), acc_after / (n_steps - burn)
+
+
+def split_rhat(chains):
+    """Split-R-hat per parameter for chains (n_chains, n_samples, n_params) (Gelman et al.)."""
+    c = np.asarray(chains, float)
+    h = c.shape[1] // 2
+    c = np.concatenate([c[:, :h], c[:, h:2 * h]], axis=0)
+    m, n = c.shape[0], c.shape[1]
+    w = c.var(axis=1, ddof=1).mean(axis=0)
+    b = n * c.mean(axis=1).var(axis=0, ddof=1)
+    var = (n - 1) / n * w + b / n
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.sqrt(np.where(w > 0, var / w, 1.0))
+
+
+def ensemble(theta_best, pb, n_steps=100000, n_keep=320, n_chains=4, seed=1, temperature=None):
+    """The main ensemble. n_chains adaptive chains start at the best fit and run in parallel. The
+    tempered posterior is multimodal (independent chains settle in different modes, with the switch
+    shear near 2 or near 4 Pa), which a random-walk sampler cannot weight; the ensemble is therefore
+    the chain with the lowest mean chi2, which describes the uncertainty around the best fit, and the
+    weakly identified switch is covered by the scenario ensembles. Returns the samples, the
+    temperature, their acceptance rate, and diagnostics of all chains (split-R-hat across chains,
+    per-chain mean chi2 and medians)."""
+    from multiprocessing import Pool
+    if temperature is None:
+        temperature = max(pb.chi2(theta_best) / (len(pb.y) - len(M.NAMES)), 1.0)
+    cov0 = np.diag((0.02 * (M.HI - M.LO)) ** 2)
+    jobs = [(np.asarray(theta_best, float), cov0, (), temperature, n_steps, n_keep, seed + k)
+            for k in range(n_chains)]
+    with Pool(n_chains) as pool:
+        res = pool.map(_chain, jobs)
+    chains = np.array([r[0] for r in res])
+    mean_chi2 = [float(np.mean([pb.chi2(th) for th in c])) for c in chains]
+    best = int(np.argmin(mean_chi2))
+    diag = dict(n_chains=n_chains, n_steps=n_steps, chosen=best, mean_chi2=mean_chi2,
+                acceptance=[float(r[1]) for r in res],
+                split_rhat=dict(zip(M.NAMES, map(float, split_rhat(chains)))),
+                chain_medians={n: [float(np.median(c[:, i])) for c in chains] for i, n in enumerate(M.NAMES)})
+    return chains[best], temperature, float(res[best][1]), diag
 
 
 def held_out(samples, theta_best):
@@ -138,18 +205,31 @@ def held_out(samples, theta_best):
     return rows
 
 
-def leave_out(groups, theta_best, n_starts=8):
-    """Refit without each group of protocols and predict it: a check that the mechanisms, not the
-    fit, carry the behaviour of that experiment."""
+# Groups of protocols refitted without and then predicted (a check that the mechanisms, not the
+# fit, carry the behaviour of that experiment).
+LEAVE_OUT = {
+    "gradual drop (Fig. S5)": ("stef22_gradual",),
+    "abrupt drop (Fig. 4k,l)": ("stef22_8_to_1.4",),
+    "abrupt rise from aligned (Fig. 4g,h)": ("stef22_1.4_to_8",),
+    "PP1 during the drop (Fig. 4l)": ("stef22_8_to_1.4_pp1",),
+    "drop after 8 Pa, flat (Wu Fig. 5)": ("wu21_fig5_flat",),
+    "perpendicular gratings at 10 Pa": ("rob14_coc_perp_10",),
+}
+
+
+def leave_out(groups, theta_best, n_starts=16):
+    """Refit without each group of protocols and predict it. The refits start as the main fit does
+    (initial values and Latin-hypercube points), not from the full-data best fit."""
     rows = []
     for name, protos in groups.items():
-        th, c2, _ = fit(n_starts=n_starts, max_nfev=2500, verbose=False, exclude=protos, x_first=theta_best)
+        th, c2, _ = fit(n_starts=n_starts, max_nfev=2500, verbose=False, exclude=protos)
         pt = Problem("train", only=protos)
         pred = pt.predict(th)
         full = pt.predict(theta_best)
         for o, pv, fv in zip(pt.obs, pred, full):
             rows.append(dict(group=name, protocol=o.protocol, time=o.time, quantity=o.quantity,
-                             observed=o.value, sigma=o.sigma, left_out=float(pv), full_fit=float(fv)))
+                             observed=o.value, sigma=o.sigma, left_out=float(pv), full_fit=float(fv),
+                             chi2_refit=float(c2)))
     return rows
 
 
@@ -186,11 +266,12 @@ def source_of(protocol):
     return "Wu 2021"
 
 
-def profile(theta_best, name="tau_x", values=(2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0), max_nfev=4000,
-            processes=3, seed=11):
+def profile(theta_best, name="tau_x", values=(1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0),
+            max_nfev=4000, processes=3, seed=11):
     """Profile of the data chi2 over one parameter: refit all others with it held at each value
-    (best fit and three random starts). Returns, per value, the refitted parameters, the chi2 and
-    its split by data source."""
+    (best fit and three random starts). Values may lie outside the parameter's bounds (a check of
+    what the bound imposes). Returns, per value, the refitted parameters, the chi2 and its split by
+    data source."""
     from multiprocessing import Pool
     with Pool(processes) as pool:
         fits = pool.map(_fixed, [(name, v, theta_best, max_nfev, seed + k) for k, v in enumerate(values)])
@@ -202,46 +283,42 @@ def profile(theta_best, name="tau_x", values=(2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0,
         r = (pb.predict(th) - pb.y) / pb.s
         rows.append(dict(value=float(v), chi2=float(c2), theta=th.tolist(),
                          by_source={g: float(np.sum(r[src == g] ** 2)) for g in sorted(set(src))}))
-    return dict(parameter=name, rows=rows, n_obs={g: int(np.sum(src == g)) for g in sorted(set(src))})
+    i = M.NAMES.index(name)
+    return dict(parameter=name, bounds=[float(M.LO[i]), float(M.HI[i])], rows=rows,
+                n_obs={g: int(np.sum(src == g)) for g in sorted(set(src))})
 
 
-def scenario_ensemble(theta_best, name="tau_x", values=(2.2, 3.0, 4.0), n_per=16, n_steps=12000, seed=3):
-    """Parameter sets for design under a scenario of a weakly identified parameter: for each value,
-    refit the others with it held fixed, then sample around that fit (tempered as the main
-    ensemble) with it still fixed. Used so that designs hold wherever the switch lies."""
+def scenario_ensemble(theta_best, samples, name="tau_x", values=(2.2, 3.0, 4.0), n_per=32, n_steps=80000,
+                      seed=3):
+    """Parameter sets under scenarios of a weakly identified parameter: for each value, refit the
+    others with it held fixed, then sample the tempered posterior (temperature: reduced chi2 of that
+    refit) with it still fixed, by an adaptive chain whose initial proposal covariance is that of
+    the main ensemble `samples`. Returns n_per distinct thinned sets per value; the designs use
+    every other one, the rest serve as monolayers the controller does not know."""
     from multiprocessing import Pool
+    i = M.NAMES.index(name)
     with Pool(min(4, len(values))) as pool:
         fits = pool.map(_fixed, [(name, v, theta_best, 2500, seed + k) for k, v in enumerate(values)])
     pb = Problem("train")
-    i = M.NAMES.index(name)
-    out = []
-    for (th, c2), v in zip(fits, values):
-        temp = max(c2 / (len(pb.y) - len(M.NAMES) + 1), 1.0)
-        rng = np.random.default_rng(seed)
-        x = th.copy()
-        lp = log_post(x, pb, temp)
-        width = (M.HI - M.LO) * 0.01
-        width[i] = 0.0
-        kept = []
-        for step in range(1, n_steps + 1):
-            y = x + rng.normal(size=x.size) * width
-            ly = log_post(y, pb, temp)
-            if np.log(rng.random()) < ly - lp:
-                x, lp = y, ly
-            if step > n_steps // 4 and step % ((3 * n_steps // 4) // n_per) == 0:
-                kept.append(x.copy())
-        out.append(dict(value=v, chi2=c2, samples=np.array(kept[:n_per])))
-    return out
+    cov0 = np.cov(np.asarray(samples, float).T)
+    temps = [max(c2 / (len(pb.y) - len(M.NAMES) + 1), 1.0) for _, c2 in fits]
+    jobs = [(th, cov0, (i,), T, n_steps, n_per, seed + 100 + k) for k, ((th, _), T) in enumerate(zip(fits, temps))]
+    with Pool(min(4, len(values))) as pool:
+        chains = pool.map(_chain, jobs)
+    return [dict(value=v, chi2=c2, temperature=T, acceptance=acc, samples=smp)
+            for v, (_, c2), T, (smp, acc) in zip(values, fits, temps, chains)]
 
 
-def save(path, theta_best, chi2, samples, pb, temperature=1.0, tests=None):
+def save(path, theta_best, chi2, samples, pb, temperature=1.0, tests=None, acceptance=None, chains=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     table = [dict(protocol=o.protocol, time=o.time, quantity=o.quantity, value=o.value, sigma=o.sigma,
                   fit=float(f)) for o, f in zip(pb.obs, pb.predict(theta_best))]
     json.dump(dict(names=M.NAMES, best=list(map(float, theta_best)), chi2=chi2, n_obs=len(pb.y),
-                   n_params=len(M.NAMES), temperature=temperature, informative_priors=INFORMATIVE,
-                   samples=samples.tolist(), fit_table=table, held_out=tests or []), open(path, "w"), indent=1)
+                   n_params=len(M.NAMES), temperature=temperature, acceptance=acceptance,
+                   chains=chains,
+                   informative_priors=INFORMATIVE, samples=samples.tolist(), fit_table=table,
+                   held_out=tests or []), open(path, "w"), indent=1)
 
 
 def load(path):
@@ -250,9 +327,4 @@ def load(path):
 
 
 if __name__ == "__main__":
-    import sys
-    out = sys.argv[1] if len(sys.argv) > 1 else "results/conditioning/calibration.json"
-    theta, c2, pb = fit(n_starts=16, max_nfev=2500)
-    samples, temp = ensemble(theta, pb)
-    save(out, theta, c2, samples, pb, temp, held_out(samples, theta))
-    print("saved", out)
+    print("run: python -m conditioning.run_all --recalibrate  (calibration, tests, scenarios and designs)")

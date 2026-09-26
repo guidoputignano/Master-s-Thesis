@@ -2,9 +2,10 @@
 
 Every value comes from a published figure or text of the group's parallel-plate chamber
 (20 x 0.3 x 60 mm), read as stated in `how`. Figure values were digitised from the publishers'
-images or rendered PDF pages (scripts and overlays kept with the paper repository); their reading
-error (about 1.5 deg, 0.05 in aspect ratio, 0.02 in connectivity) is small against the spread
-between experiments and is folded into `sigma`.
+images or rendered PDF pages, and for Robotti et al. from the figures of the thesis chapter that
+reproduces the article (scripts and overlays kept with the paper repository). The reading
+resolution (about 1.5 deg and 0.05 in aspect ratio, estimated from the axis ticks, not measured by
+repeated readings) is small against the spread between experiments and is folded into `sigma`.
 
 Roles
 -----
@@ -142,14 +143,17 @@ _o("rob14_static_par", [0.01], "angle", [21.5], 2.5, "train", "Fig. 8b CTRL bar"
 WU5 = [(1, 1.4, 1.4), (12, 8, 8), (7, 1.4, 1.4)]
 _p("wu21_fig5_flat", WU5, "silicone_flat", WU21 + ", Fig. 5",
    note="1 h at 1.4 Pa, 12 h at 8 Pa, then an abrupt drop to 1.4 Pa for 6-8 h (7 h used)")
-_o("wu21_fig5_flat", [20], "retention", [0.64], 0.07, "train",
-   "density after the drop over static: 435/623 (Wu, static from another experiment) and 396/683 "
-   "(our pipeline on Xi's files, same figure); mean of the two, sigma spans both")
+_o("wu21_fig5_flat", [20], "retention", [0.63], 0.07, "train",
+   "density after the drop over the static control of the same panel: 435/688 (Fig. 5a; 435 from the "
+   "text, the static bar digitised at 687-689); our pipeline on Xi's files gives 396/683 = 0.58, "
+   "reported separately; sigma covers both")
 _o("wu21_fig5_flat", [20], "ci", [0.59], 0.05, "train", "text, C.I. = 0.59 +- 0.05")
 _o("wu21_fig5_flat", [20], "angle", [45.0], 2.5, "train", "text, 45 +- 25 deg over 108 cells")
 _o("wu21_fig5_flat", [20], "ar", [1.93], 0.07, "train", "text, A.R. 1.93 +- 0.71 over 108 cells")
 _p("wu21_fig5_bf", WU5, "silicone_bf", WU21 + ", Fig. 5")
-_o("wu21_fig5_bf", [20], "retention", [0.835], 0.05, "test", "671/783 (Wu) and 626/772 (ours); mean")
+_o("wu21_fig5_bf", [20], "retention", [0.84], 0.05, "test",
+   "671/797 (Fig. 5a; 671 from the text, the static bar digitised at 797-798; not marked significant); "
+   "our pipeline gives 626/772 = 0.81, reported separately")
 _o("wu21_fig5_bf", [20], "ci", [1.0], 0.1, "test", "text, C.I. = 1.0 +- 0.1")
 _o("wu21_fig5_bf", [20], "angle", [47.0], 2.5, "test", "text, 47 +- 26 deg")
 _o("wu21_fig5_bf", [20], "ar", [1.84], 0.06, "test", "text, A.R. 1.84 +- 0.63")
@@ -157,8 +161,10 @@ _o("wu21_fig5_bf", [20], "ar", [1.84], 0.06, "test", "text, A.R. 1.84 +- 0.63")
 # --- context: not fitted ---------------------------------------------------------------------------
 CONTEXT = [
     dict(what="Order on breath figures relative to flat, 1.4 Pa 12 h then reversed", value=0.58,
-         how="(45-31)/(45-21) from Wu 2021 Fig. 4e (31 +- 23 vs 21 +- 18 deg); fixes the order factor of "
-             "silicone_bf, independently of the Fig. 5 outcome that is held out"),
+         how="(45-31)/(45-21) from Wu 2021 Fig. 4e (31 +- 23 vs 21 +- 18 deg), a flow-reversal experiment; "
+             "fixes the order factor of silicone_bf, independently of the Fig. 5 outcome that is held out. "
+             "Orientation was also reduced on breath figures at 8 Pa (Wu Fig. S8) but not after 16 h of "
+             "unperturbed flow at 1.4 Pa (Fig. S5: 29 vs 31 deg), nor on isotropic pits in Morgan et al. 2012"),
     dict(what="Flow reversal at 1.4 Pa on flat (Wu 2021 Fig. 4)", value=None,
          how="density 522 -> 455 cells/mm2, C.I. 1.0 -> 0.7, orientation kept (21 deg); polarity is not "
              "in the model, so reversal is left out"),

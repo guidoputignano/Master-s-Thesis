@@ -1,16 +1,19 @@
-"""Model predictive control of conditioning with imaging feedback (shrinking horizon).
+"""Model predictive control of conditioning with imaging feedback (shrinking horizon, simulated).
 
-The controller carries the calibration ensemble as a weighted belief (a multiple-model, Bayesian
-description of what it does not know). Every DECIDE hours it (1) weighs each parameter set by the
-likelihood of all live-imaging measurements so far (orientation from DIC or a membrane dye, and cell
-density), (2) re-solves the optimal-control problem of design.optimise over the knots not yet applied,
-under the weighted ensemble, warm-started from the current plan and from the best of a library of
-simple continuations, and (3) applies the next DECIDE hours of the solution. Knots already applied
-are never changed. The plant is a parameter set the controller does not know; the open-loop
-comparison applies the path designed once from the unweighted ensemble.
+The controller carries a finite set of parameter sets as a weighted belief (a multiple-model,
+Bayesian description of what it does not know; Magill 1965, with deterministic predictions in place
+of per-model state estimators). Every DECIDE hours it (1) weighs each set by the likelihood of all
+live measurements so far (mean orientation and cell density; candidate readouts in this chamber are
+DIC under flow and live nuclear or bright-field imaging), (2) re-solves the optimal-control problem
+of design.optimise over the knots not yet applied, under the weighted sets, warm-started from the
+current plan and from the best of a library of simple continuations, and (3) applies the next DECIDE
+hours of the solution. Knots already applied are never changed. It learns passively: inputs are not
+chosen in order to learn (no probing). The plant is a parameter set the controller does not know; the
+open-loop comparison applies the path designed once from the unweighted sets.
 
-Measurement noise follows the imaging: orientation +-3 deg and density +-3 % per time point.
-Junction connectivity needs fixed, stained cells, so it is not measured during conditioning.
+Simulated measurement noise: orientation +-3 deg and density +-3 % per time point; the likelihood
+uses the same values. Junction connectivity needs fixed, stained cells, so it is not measured
+during conditioning.
 """
 import numpy as np
 
@@ -50,9 +53,9 @@ def continuations(current, target, t_now):
     return rem, [np.clip(x, target.tau_min, target.tau_max) for x in lib]
 
 
-def run(target, prior, plant, open_loop_knots, seed=0, verbose=False):
-    """Closed loop against a plant parameter set. Returns the applied knots, weight history and
-    the plant outcome for closed and open loop."""
+def run(target, prior, plant, open_loop_knots, seed=0, verbose=False, mu=None):
+    """Closed loop against a plant parameter set (move-penalty weight mu, design.MU_TV unless given).
+    Returns the applied knots, weight history and the plant outcome for closed and open loop."""
     rng = np.random.default_rng(seed)
     nk = Dsg.n_knots(target)
     knots = np.array(open_loop_knots, float)
@@ -89,11 +92,11 @@ def run(target, prior, plant, open_loop_knots, seed=0, verbose=False):
             x = knots.copy()
             x[rem] = c
             cands.append(x)
-        obj = Dsg.objective(np.array(cands), target, prior, w)
+        obj = Dsg.objective(np.array(cands), target, prior, w, mu)
         warm = cands[int(np.argmax(obj))]
         x_new, _ = Dsg.optimise(target, prior, starts=[knots, warm], maxiter=MAXITER, weights=w, free=rem,
-                                fixed=knots)
-        j_new, j_keep = Dsg.objective(np.array([x_new, knots]), target, prior, w)
+                                fixed=knots, mu=mu)
+        j_new, j_keep = Dsg.objective(np.array([x_new, knots]), target, prior, w, mu)
         if j_new > j_keep + 1e-3:          # keep the current plan unless the new one is clearly better
             knots = x_new
         history.append(dict(t=float(t_now), ess=float(1.0 / np.sum(w ** 2)), shear_now=current,
