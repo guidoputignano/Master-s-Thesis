@@ -124,7 +124,22 @@ def test_closed_loop_library_respects_the_bounds():
     from conditioning import closed_loop as CL
     tg = Dsg.Target(tau=8.0, budget=8.0)
     rem, lib = CL.continuations(4.3, tg, 2.0)
-    assert rem.sum() == Dsg.n_knots(tg) - 4
+    assert rem.sum() == Dsg.n_knots(tg) - 5          # knots at 0, 0.5, 1, 1.5 and 2 h are applied
     for c in lib:
         assert len(c) == rem.sum()
         assert c.min() >= tg.tau_min - 1e-12 and c.max() <= tg.tau_max + 1e-12
+
+
+def test_mpc_never_changes_applied_shear():
+    from conditioning import closed_loop as CL
+    tg = Dsg.Target(tau=8.0, budget=4.0)
+    thetas = np.vstack([M.X0, M.X0])
+    thetas[1, M.NAMES.index("tau_x")] = 5.0
+    plant = thetas[1].copy()
+    run = CL.run(tg, thetas, plant, Dsg.two_level(4.3, 2.0, tg), seed=1)
+    plans = [np.array(h["knots"]) for h in run["history"]]
+    for h, before, after in zip(run["history"][1:], plans[:-1], plans[1:]):
+        applied = ~CL.free_knots(tg, h["t"])
+        assert np.allclose(before[applied], after[applied])
+    assert np.allclose(plans[-1], run["knots"])
+    assert run["knots"].min() >= tg.tau_min and run["knots"].max() <= tg.tau_max

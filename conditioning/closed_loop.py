@@ -1,11 +1,13 @@
-"""Receding-horizon conditioning with imaging feedback.
+"""Model predictive control of conditioning with imaging feedback (shrinking horizon).
 
-The controller carries the calibration ensemble as a weighted belief. Every DECIDE hours it
-(1) weighs each parameter set by the likelihood of what live imaging has shown so far (orientation
-from DIC or a membrane dye, and cell density), (2) scores a library of continuations of the path
-under the weighted ensemble and (3) applies the first DECIDE hours of the best one. The plant is a
-parameter set the controller does not know; the open-loop comparison applies the path designed once
-from the unweighted ensemble.
+The controller carries the calibration ensemble as a weighted belief (a multiple-model, Bayesian
+description of what it does not know). Every DECIDE hours it (1) weighs each parameter set by the
+likelihood of all live-imaging measurements so far (orientation from DIC or a membrane dye, and cell
+density), (2) re-solves the optimal-control problem of design.optimise over the knots not yet applied,
+under the weighted ensemble, warm-started from the current plan and from the best of a library of
+simple continuations, and (3) applies the next DECIDE hours of the solution. Knots already applied
+are never changed. The plant is a parameter set the controller does not know; the open-loop
+comparison applies the path designed once from the unweighted ensemble.
 
 Measurement noise follows the imaging: orientation +-3 deg and density +-3 % per time point.
 Junction connectivity needs fixed, stained cells, so it is not measured during conditioning.
@@ -19,6 +21,14 @@ DECIDE = 1.0           # h between decisions
 SIG_ANGLE = 3.0
 SIG_R = 0.03
 LEVELS = (0.5, 1.4, 2.0, 3.0, 4.0, 4.5, 5.0, 5.5, 6.0, 7.0)   # Pa, intermediate levels in the library
+MAXITER = 30           # L-BFGS-B iterations per decision
+
+
+def free_knots(target, t_now):
+    """Knots the controller may still change at t_now: those after it (the knot at t_now ends the
+    segment already applied), or all of them before flow starts."""
+    tk = np.arange(Dsg.n_knots(target)) * Dsg.KNOT
+    return tk > t_now + 1e-9 if t_now > 0 else np.ones(len(tk), bool)
 
 
 def continuations(current, target, t_now):
@@ -26,7 +36,7 @@ def continuations(current, target, t_now):
     current shear for 1-8 h, ramp to it over 1-8 h, or hold an intermediate level for 1-8 h first.
     Returns knot arrays for the remaining conditioning window."""
     tk = np.arange(Dsg.n_knots(target)) * Dsg.KNOT
-    rem = tk >= t_now - 1e-9
+    rem = free_knots(target, t_now)
     tr = tk[rem] - t_now
     tau = target.tau
     lib = [np.full(tr.shape, tau)]
@@ -71,7 +81,7 @@ def run(target, prior, plant, open_loop_knots, seed=0, verbose=False):
         w /= w.sum()
         tx = prior[:, M.NAMES.index("tau_x")]
         tx_mean = float(w @ tx)
-        # choose the continuation with the best weighted robust score
+        # re-solve the optimal-control problem over the knots not yet applied
         current = float(np.interp(t_now, np.arange(nk) * Dsg.KNOT, knots))
         rem, lib = continuations(current, target, t_now)
         cands = []
@@ -79,19 +89,17 @@ def run(target, prior, plant, open_loop_knots, seed=0, verbose=False):
             x = knots.copy()
             x[rem] = c
             cands.append(x)
-        ev = Dsg.evaluate(np.array([Dsg.path(x, target) for x in cands]), target, prior)
-        mean = ev["score"] @ w
-        sd = np.sqrt(np.maximum((ev["score"] - mean[:, None]) ** 2 @ w, 0.0))
-        best = int(np.argmax(mean - Dsg.LAMBDA * sd))
-        # keep the current plan unless a candidate is clearly better
-        keep = Dsg.evaluate(Dsg.path(knots, target)[None], target, prior)["score"][0]
-        keep_m = keep @ w
-        keep_rs = keep_m - Dsg.LAMBDA * np.sqrt(max(((keep - keep_m) ** 2) @ w, 0.0))
-        if mean[best] - Dsg.LAMBDA * sd[best] > keep_rs + 1e-3:
-            knots = cands[best]
+        obj = Dsg.objective(np.array(cands), target, prior, w)
+        warm = cands[int(np.argmax(obj))]
+        x_new, _ = Dsg.optimise(target, prior, starts=[knots, warm], maxiter=MAXITER, weights=w, free=rem,
+                                fixed=knots)
+        j_new, j_keep = Dsg.objective(np.array([x_new, knots]), target, prior, w)
+        if j_new > j_keep + 1e-3:          # keep the current plan unless the new one is clearly better
+            knots = x_new
         history.append(dict(t=float(t_now), ess=float(1.0 / np.sum(w ** 2)), shear_now=current,
                             tau_x_mean=tx_mean, tau_x_sd=float(np.sqrt(max(w @ (tx - tx_mean) ** 2, 0.0))),
-                            observed_angle=float(obs_angle[-1]) if obs_angle else None))
+                            observed_angle=float(obs_angle[-1]) if obs_angle else None,
+                            knots=knots.tolist()))
         if verbose:
             print(f"t={t_now:4.1f} h  effective sets {history[-1]['ess']:.1f}  shear {current:.2f}", flush=True)
     closed = Dsg.evaluate(Dsg.path(knots, target)[None], target, plant[None])

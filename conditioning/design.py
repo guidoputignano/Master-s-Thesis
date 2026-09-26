@@ -94,8 +94,20 @@ def evaluate(paths, target, thetas):
     return {k: v.reshape(n_p, n_s) for k, v in res.items()}
 
 
-def robust(score):
-    return score.mean(axis=1) - LAMBDA * score.std(axis=1)
+def robust(score, weights=None):
+    """mean - LAMBDA * sd over parameter sets (axis 1), optionally weighted (a belief over the sets)."""
+    if weights is None:
+        return score.mean(axis=1) - LAMBDA * score.std(axis=1)
+    w = np.asarray(weights, float) / np.sum(weights)
+    m = score @ w
+    return m - LAMBDA * np.sqrt(np.maximum(((score - m[:, None]) ** 2) @ w, 0.0))
+
+
+def objective(knot_sets, target, thetas, weights=None):
+    """The optimal-control objective of each knot vector: robust score minus the move penalty."""
+    knot_sets = np.atleast_2d(knot_sets)
+    sc = robust(evaluate(np.array([path(k, target) for k in knot_sets]), target, thetas)["score"], weights)
+    return sc - MU_TV * np.array([variation(k, target) for k in knot_sets])
 
 
 def baselines(target):
@@ -113,29 +125,40 @@ def baselines(target):
     return {k: np.clip(v, 0.0, target.tau_max) for k, v in ref.items()}
 
 
-def optimise(target, thetas, starts=None, maxiter=60, fd=0.05, verbose=False):
-    """Maximise the robust score over knot values in [tau_min, tau_max]."""
+def optimise(target, thetas, starts=None, maxiter=60, fd=0.05, verbose=False, weights=None, free=None,
+             fixed=None):
+    """Solve the optimal-control problem: maximise the (optionally belief-weighted) robust score minus
+    the move penalty over the free knots, each in [tau_min, tau_max]; knots not free keep the values of
+    `fixed` (the part of the path already applied, in receding-horizon use). Returns the knots and
+    their robust score (weighted if `weights` is given)."""
     thetas = np.atleast_2d(thetas)
     nk = n_knots(target)
+    free = np.ones(nk, bool) if free is None else np.asarray(free, bool)
+    base = np.full(nk, target.tau, float) if fixed is None else np.asarray(fixed, float).copy()
     starts = list(baselines(target).values()) if starts is None else starts
+    nf = int(free.sum())
 
-    def f_and_grad(x):
-        X = np.vstack([x] + [x + fd * np.eye(nk)[i] for i in range(nk)])
-        X = np.clip(X, target.tau_min, target.tau_max)
-        sc = robust(evaluate(np.array([path(k, target) for k in X]), target, thetas)["score"])
-        sc = sc - MU_TV * np.array([variation(k, target) for k in X])
-        return -sc[0], -(sc[1:] - sc[0]) / fd
+    def full(z):
+        x = base.copy()
+        x[free] = z
+        return x
+
+    def f_and_grad(z):
+        Z = np.clip(np.vstack([z] + [z + fd * np.eye(nf)[i] for i in range(nf)]), target.tau_min, target.tau_max)
+        obj = objective(np.array([full(v) for v in Z]), target, thetas, weights)
+        return -obj[0], -(obj[1:] - obj[0]) / fd
 
     best = None
     for x0 in starts:
-        res = minimize(f_and_grad, np.asarray(x0, float), jac=True, method="L-BFGS-B",
-                       bounds=[(target.tau_min, target.tau_max)] * nk, options=dict(maxiter=maxiter))
+        z0 = np.clip(np.asarray(x0, float)[free], target.tau_min, target.tau_max)
+        res = minimize(f_and_grad, z0, jac=True, method="L-BFGS-B",
+                       bounds=[(target.tau_min, target.tau_max)] * nf, options=dict(maxiter=maxiter))
         if verbose:
-            print(f"  start -> robust score {-res.fun:.3f}", flush=True)
+            print(f"  start -> objective {-res.fun:.3f}", flush=True)
         if best is None or res.fun < best.fun:
             best = res
-    x = np.clip(best.x, target.tau_min, target.tau_max)
-    return x, float(robust(evaluate(path(x, target)[None], target, thetas)["score"])[0])
+    x = full(np.clip(best.x, target.tau_min, target.tau_max))
+    return x, float(robust(evaluate(path(x, target)[None], target, thetas)["score"], weights)[0])
 
 
 def two_level(level, switch, target):
