@@ -12,5 +12,6 @@ design, device and closed-loop results are simulations of the model.
 | `experiment.json` | the designed arm B (8 Pa, 8 h budget), trajectories of every path (median and 5-95 %), simulated differences B minus A | Fig. 7, `EXPERIMENT_8PA.md` |
 | `conditioning_map.json` | designed path and reference paths for 11 targets on flat silicone, breath figures and gratings across the flow | Fig. 5 |
 | `device.json` | HVAD inflow cannula: designed pump-flow profile, per-region and area-weighted outcomes for four strategies, flat surface and gratings above 3 Pa | Fig. 6 |
+| `device_log_levels.json` | the same device case with the six middle-band regions at the geometric centres of six equal logarithmic bins of 0.3-9 Pa (0.40-6.8 Pa) instead of our levels, a sensitivity check on that choice | Table S4 |
 | `closed_loop.json` | arm B in open loop, in open loop designed up to 5.5 Pa, and in closed loop, against four simulated monolayers per switch scenario (2.2, 3 and 5.5 Pa; not in the controller's belief; own noise seeds), and for 2.2 and 3 Pa also with a tenfold smaller move penalty | Fig. 8 |
 | `calibration_v1_substrate_limits.json`, `model_v1_substrate_limits.py.txt` | the first model version (a shear limit on every domain) and its failed prediction for gratings across the flow, archived as run (not rerun by `run_all`) | Fig. 4a |

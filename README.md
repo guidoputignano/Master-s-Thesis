@@ -18,13 +18,14 @@ The package [`conditioning/`](./conditioning) holds the model and the protocol d
 - `design.py`: protocol design for a target shear, robust over the ensemble (mean minus standard deviation
   of a readiness score, with a small penalty on changes of shear), reported as the simplest near-optimal
   path (the best two-level path within 0.01 of the optimum);
-- `device.py`: one pump flow for a whole device (HVAD inflow cannula, eight regions);
+- `device.py`: one pump flow for a whole device (HVAD inflow cannula, eight regions; a second set of
+  region levels, log-spaced within the middle band, checks the effect of our choice);
 - `closed_loop.py`: receding-horizon design with imaging feedback (orientation and density), with a belief
   that also covers a switch shear outside the range the designs assume;
 - `run_all.py`: reproduces every result, written to `results/conditioning/`:
 
   ```
-  python -m conditioning.run_all --parts experiment map device profile loop
+  python -m conditioning.run_all --parts experiment map device device-levels profile loop
   ```
 
   (parts can run in separate processes; the map takes about 20 min on four cores).

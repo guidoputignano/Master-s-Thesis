@@ -1,11 +1,12 @@
 """Reproduce every conditioning result used in the paper (all of them simulations).
 
     python -m conditioning.run_all [--out results/conditioning] [--recalibrate] [--quick]
-                                   [--parts experiment map device profile loop]
+                                   [--parts experiment map device device-levels profile loop]
 
 Writes JSON files to --out: calibration.json (fit, ensemble, held-out predictions, leave-out
 refits and scenario ensembles; recomputed with --recalibrate or when missing), experiment.json,
-conditioning_map.json, device.json, profile_tau_x.json, closed_loop.json (parts can run in
+conditioning_map.json, device.json, device_log_levels.json (the device with log-spaced shear levels
+in its middle band, a sensitivity check), profile_tau_x.json, closed_loop.json (parts can run in
 separate processes). The first model version (calibration_v1_substrate_limits.json) is archived as
 it was run, with its code as text; it is not rerun here.
 Designs use 32 sets of the calibration ensemble (seed 0) and 16 sets from each scenario of the
@@ -122,46 +123,59 @@ def conditioning_map(thetas, targets, surfaces, budget=12.0, processes=3, previo
     return dict(budget=budget, knot_h=D.KNOT, post_h=D.POST, rows=rows)
 
 
-def device_case(thetas, budget=12.0, previous=None):
-    """With `previous` (a stored device.json), its optima are reused: the operating flow at once is
-    taken if it scores within 0.01 of the optimum, else the stored simplified path is kept."""
-    flat = ["silicone_flat"] * len(DV.REGIONS)
-    graded = ["silicone_perp" if tau > 3.0 else "silicone_flat" for tau in DV.REGIONS]
-    out = {}
-    for label, surfs in (("flat everywhere", flat), ("gratings across the flow above 3 Pa", graded)):
-        prev = None if previous is None else previous["cases"].get(label)
-        if prev is None:
-            x_opt, s_opt = DV.optimise_device(thetas, surfs, budget=budget)
-            x, score, simple = DV.simplify_device(x_opt, thetas, surfs, budget=budget)
+def _device_one(args):
+    """One surface case of the device (a Pool worker)."""
+    label, surfs, thetas, budget, prev, tau_op, weights = args
+    if prev is None:
+        x_opt, s_opt = DV.optimise_device(thetas, surfs, budget=budget, tau_op=tau_op, weights=weights)
+        x, score, simple = DV.simplify_device(x_opt, thetas, surfs, budget=budget, tau_op=tau_op, weights=weights)
+    else:
+        x_opt, s_opt = np.array(prev["optimum_u"]), prev["optimum_score"]
+        ones = np.ones(len(x_opt))
+        s_direct = DV.evaluate_device(DV.u_path(ones, budget)[None], thetas, surfs, budget, tau_op=tau_op,
+                                      weights=weights)[0]["area"]["robust"]
+        if s_direct >= s_opt - 0.01:
+            x, score, simple = ones, s_direct, True
         else:
-            x_opt, s_opt = np.array(prev["optimum_u"]), prev["optimum_score"]
-            ones = np.ones(len(x_opt))
-            s_direct = DV.evaluate_device(DV.u_path(ones, budget)[None], thetas, surfs, budget)[0]["area"]["robust"]
-            if s_direct >= s_opt - 0.01:
-                x, score, simple = ones, s_direct, True
-            else:
-                x, simple = np.array(prev["designed_u"]), prev["simple"]
-        nk = len(x)
-        tk = np.arange(nk) * D.KNOT
-        strategies = {
-            "in-device, designed": DV.u_path(x, budget),
-            "in-device, direct": DV.u_path(np.ones(nk), budget),
-            "in-device, slow ramp (8 h)": DV.u_path(np.minimum(tk / 8.0, 1.0), budget),
-        }
-        rows = DV.evaluate_device(np.array(list(strategies.values())), thetas, surfs, budget)
-        res = {k: dict(area=r["area"], per_region={q: v.tolist() for q, v in r["per_region"].items()})
-               for k, r in zip(strategies, rows)}
-        ch = DV.chamber_then_implant(thetas, surfs, 1.4, budget)
-        res["chamber at 1.4 Pa, then implanted"] = dict(area=ch["area"],
-                                                        per_region={q: v.tolist() for q, v in ch["per_region"].items()})
-        out[label] = dict(surfaces=surfs, designed_u=x.tolist(), simple=simple, optimum_u=x_opt.tolist(),
-                          optimum_score=s_opt, strategies=res)
-        for k, r in res.items():
-            a = r["area"]
-            print(f"  device {label} | {k}: connected {a['connected']:.2f} matched {a['matched']:.2f} "
-                  f"retention {a['retention']:.2f} robust {a.get('robust', float('nan')):.2f}", flush=True)
-    return dict(regions_pa=DV.REGIONS.tolist(), weights=DV.WEIGHTS.tolist(),
-                extrapolated=DV.EXTRAPOLATED.tolist(), budget=budget, cases=out)
+            x, simple = np.array(prev["designed_u"]), prev["simple"]
+    nk = len(x)
+    tk = np.arange(nk) * D.KNOT
+    strategies = {
+        "in-device, designed": DV.u_path(x, budget),
+        "in-device, direct": DV.u_path(np.ones(nk), budget),
+        "in-device, slow ramp (8 h)": DV.u_path(np.minimum(tk / 8.0, 1.0), budget),
+    }
+    rows = DV.evaluate_device(np.array(list(strategies.values())), thetas, surfs, budget, tau_op=tau_op,
+                              weights=weights)
+    res = {k: dict(area=r["area"], per_region={q: v.tolist() for q, v in r["per_region"].items()})
+           for k, r in zip(strategies, rows)}
+    ch = DV.chamber_then_implant(thetas, surfs, 1.4, budget, tau_op=tau_op, weights=weights)
+    res["chamber at 1.4 Pa, then implanted"] = dict(area=ch["area"],
+                                                    per_region={q: v.tolist() for q, v in ch["per_region"].items()})
+    for k, r in res.items():
+        a = r["area"]
+        print(f"  device {label} | {k}: connected {a['connected']:.2f} matched {a['matched']:.2f} "
+              f"retention {a['retention']:.2f} robust {a.get('robust', float('nan')):.2f}", flush=True)
+    return label, dict(surfaces=surfs, designed_u=x.tolist(), simple=simple, optimum_u=x_opt.tolist(),
+                       optimum_score=s_opt, strategies=res)
+
+
+def device_case(thetas, budget=12.0, previous=None, tau_op=None, weights=None):
+    """Both surface cases of the device, in parallel. `tau_op`, `weights`: region levels and area shares
+    (device.REGIONS and WEIGHTS unless given). With `previous` (a stored device.json), its optima are
+    reused: the operating flow at once is taken if it scores within 0.01 of the optimum, else the
+    stored simplified path is kept."""
+    from multiprocessing import Pool
+    tau_op = DV.REGIONS if tau_op is None else np.asarray(tau_op, float)
+    weights = DV.WEIGHTS if weights is None else np.asarray(weights, float)
+    flat = ["silicone_flat"] * len(tau_op)
+    graded = ["silicone_perp" if tau > 3.0 else "silicone_flat" for tau in tau_op]
+    jobs = [(label, surfs, thetas, budget, None if previous is None else previous["cases"].get(label), tau_op, weights)
+            for label, surfs in (("flat everywhere", flat), ("gratings across the flow above 3 Pa", graded))]
+    with Pool(2) as pool:
+        out = dict(pool.map(_device_one, jobs, chunksize=1))
+    return dict(regions_pa=tau_op.tolist(), weights=weights.tolist(), extrapolated=(tau_op > 10.0).tolist(),
+                budget=budget, cases=out)
 
 
 def _loop_one(args):
@@ -240,7 +254,7 @@ def main():
     ap.add_argument("--out", default="results/conditioning")
     ap.add_argument("--recalibrate", action="store_true")
     ap.add_argument("--quick", action="store_true", help="fewer targets and surfaces")
-    ap.add_argument("--parts", nargs="+", default=["experiment", "map", "device", "profile", "loop"])
+    ap.add_argument("--parts", nargs="+", default=["experiment", "map", "device", "device-levels", "profile", "loop"])
     ap.add_argument("--reuse-optima", action="store_true",
                     help="map and device: reuse the stored optima (redo the simplification only)")
     a = ap.parse_args()
@@ -291,6 +305,12 @@ def main():
         previous = json.load(open(out / "device.json")) if a.reuse_optima else None
         json.dump(device_case(thetas, previous=previous), open(out / "device.json", "w"))
         print(f"device done ({time.time() - t0:.0f} s)", flush=True)
+    if "device-levels" in a.parts:
+        # sensitivity to our choice of shear levels within the cannula's middle band
+        previous = json.load(open(out / "device_log_levels.json")) if a.reuse_optima else None
+        json.dump(device_case(thetas, previous=previous, tau_op=DV.REGIONS_LOG),
+                  open(out / "device_log_levels.json", "w"))
+        print(f"device, log-spaced levels, done ({time.time() - t0:.0f} s)", flush=True)
     if "profile" in a.parts:
         json.dump(C.profile(theta), open(out / "profile_tau_x.json", "w"), indent=1)
         print(f"profile done ({time.time() - t0:.0f} s)", flush=True)

@@ -27,6 +27,9 @@ from . import model as M
 REGIONS = np.array([0.15, 0.5, 1.0, 2.0, 3.5, 5.5, 8.0, 11.0])           # Pa at the operating point
 WEIGHTS = np.array([0.255] + [0.655 / 6] * 6 + [0.09])
 EXTRAPOLATED = REGIONS > 10.0
+# Sensitivity check on our choice of levels: the middle band (0.3-9 Pa) split into six equal
+# logarithmic bins, each region at the geometric centre of its bin (0.40 to 6.8 Pa)
+REGIONS_LOG = np.array([0.15] + list(0.3 * 30.0 ** ((np.arange(6) + 0.5) / 6.0)) + [11.0])
 U_MIN = 0.1        # flow runs from the start
 
 
@@ -80,14 +83,16 @@ MU_U = 0.02        # score per unit of total variation of the flow fraction (a s
                    # design.MU_TV, which is per Pa)
 
 
-def optimise_device(thetas, surfaces, budget=24.0, hold=2.0, maxiter=40, fd=0.02, starts=None):
+def optimise_device(thetas, surfaces, budget=24.0, hold=2.0, maxiter=40, fd=0.02, starts=None, tau_op=REGIONS,
+                    weights=WEIGHTS):
     nk = int(round((budget - hold) / Dsg.KNOT)) + 1
     tk = np.arange(nk) * Dsg.KNOT
     starts = starts or [np.ones(nk), np.minimum(tk / 8.0, 1.0), np.full(nk, 0.5)]
 
     def f_and_grad(x):
         X = np.clip(np.vstack([x] + [x + fd * np.eye(nk)[i] for i in range(nk)]), U_MIN, 1.2)
-        rows = evaluate_device(np.array([u_path(k, budget, hold) for k in X]), thetas, surfaces, budget, hold)
+        rows = evaluate_device(np.array([u_path(k, budget, hold) for k in X]), thetas, surfaces, budget, hold,
+                               tau_op, weights)
         sc = np.array([r["area"]["robust"] for r in rows])
         tv = np.array([np.sum(np.sqrt(np.diff(np.concatenate([[0.0], k, [1.0]])) ** 2 + 0.01 ** 2) - 0.01)
                        for k in X])
@@ -101,23 +106,25 @@ def optimise_device(thetas, surfaces, budget=24.0, hold=2.0, maxiter=40, fd=0.02
         if best is None or res.fun < best.fun:
             best = res
     x = np.clip(best.x, U_MIN, 1.2)
-    return x, evaluate_device(u_path(x, budget, hold)[None], thetas, surfaces, budget, hold)[0]["area"]["robust"]
+    return x, evaluate_device(u_path(x, budget, hold)[None], thetas, surfaces, budget, hold, tau_op,
+                              weights)[0]["area"]["robust"]
 
 
-def simplify_device(x, thetas, surfaces, budget=24.0, hold=2.0, tol=0.01, step=0.05):
+def simplify_device(x, thetas, surfaces, budget=24.0, hold=2.0, tol=0.01, step=0.05, tau_op=REGIONS, weights=WEIGHTS):
     """The operating flow from the start if it scores within tol of x, else the best two-level
     flow path (a fraction from the start, then operating flow) if it does, else x.
     Returns (knots, robust score, simple)."""
     nk = len(x)
     tk = np.arange(nk) * Dsg.KNOT
-    s_opt = evaluate_device(u_path(x, budget, hold)[None], thetas, surfaces, budget, hold)[0]["area"]["robust"]
+    s_opt = evaluate_device(u_path(x, budget, hold)[None], thetas, surfaces, budget, hold, tau_op,
+                            weights)[0]["area"]["robust"]
     cands = [np.ones(nk)] + [np.where(tk < T - 1e-9, lv, 1.0)
                              for T in np.arange(Dsg.KNOT, budget - hold + 1e-9, Dsg.KNOT)
                              for lv in np.arange(U_MIN, 1.2 + 1e-9, step)]
     sc = []
     for i in range(0, len(cands), 40):
         rows = evaluate_device(np.array([u_path(k, budget, hold) for k in cands[i:i + 40]]), thetas, surfaces,
-                               budget, hold)
+                               budget, hold, tau_op, weights)
         sc += [r["area"]["robust"] for r in rows]
     if sc[0] >= s_opt - tol:                                    # cands[0]: operating flow at once
         return cands[0], float(sc[0]), True
